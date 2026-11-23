@@ -322,7 +322,7 @@ function render(data, loading){
         });
         c.innerHTML = items.join('');
         const time = r.start ? r.start + (r.end ? '〜' + r.end : '〜') : '';
-        bind(c, dates[i], r.name + (/^\d+$/.test(r.name) ? '限' : '') + (time ? ' ' + time : ''), detail, { s: r.s, e: r.e });
+        bind(c, dates[i], r.name + (/^\d+$/.test(r.name) ? '限' : '') + (time ? ' ' + time : ''), detail, { s: r.s, e: (r.kind === 'fold' || r.after) ? Math.min(r.e, r.s + 60) : r.e });
         g.appendChild(c);
       });
     });
