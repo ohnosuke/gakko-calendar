@@ -17,6 +17,7 @@
   --c1-bg:#e6f1fb; --c1-fg:#0c447c;
   --c2-bg:#fbeaf0; --c2-fg:#72243e;
   --hol-bg:#eeedfe; --hol-fg:#3c3489;
+  --work:#e3ebf5;
 }
 @media (prefers-color-scheme: dark){
   :root{
@@ -27,6 +28,7 @@
     --c1-bg:#0c447c; --c1-fg:#e6f1fb;
     --c2-bg:#72243e; --c2-fg:#fbeaf0;
     --hol-bg:#3c3489; --hol-fg:#eeedfe;
+    --work:#2b3443;
   }
 }
 *{box-sizing:border-box}
@@ -69,6 +71,10 @@ details#settings p{color:var(--sub);font-size:11px;margin:8px 0}
 .it.cont{flex:0 0 6px}
 .ad .it{flex:none;padding:1px 2px}
 .wk{flex:none;font-size:8px;color:var(--sub);text-align:center;line-height:1.3}
+.cell.hour{min-height:22px}
+.cell.work{background:var(--work)}
+.lab.tog{cursor:pointer;color:var(--fg)}
+.lab.tog small{color:var(--sub)}
 .legend{display:flex;gap:10px;flex-wrap:wrap;justify-content:center;font-size:10px;color:var(--sub);margin:4px 0 12px}
 .legend span::before{content:"";display:inline-block;width:9px;height:9px;border-radius:2px;margin-right:3px;vertical-align:-1px;background:var(--sw)}
 #sheet{position:fixed;left:0;right:0;bottom:0;background:var(--bg);border-top:1px solid var(--line);padding:10px 14px calc(env(safe-area-inset-bottom) + 12px);font-size:13px;display:none;max-height:45vh;overflow:auto;box-shadow:0 -4px 16px rgba(0,0,0,.08)}
@@ -127,10 +133,42 @@ function esc(s){ return String(s).replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt
 
 function startDate(){ return addDays(sundayOf(new Date()), offset * 7); }
 
+let openEarly = store.get('gc:early') === '1';
+let openLate = store.get('gc:late') === '1';
+function fmtMin(m){ return Math.floor(m/60) + ':' + String(m%60).padStart(2,'0'); }
+function hourRows(from, to){
+  const a = [];
+  for (let m = from; m < to; ) {
+    const n = Math.min(to, (Math.floor(m/60) + 1) * 60);
+    a.push({ name: Math.floor(m/60) + '時', s: m, e: n, start: fmtMin(m), end: fmtMin(n), kind: 'hour' });
+    m = n;
+  }
+  return a;
+}
+
+// 朝〜放課後は時程の校時。その前（0 時〜）と放課後のあとは畳んでおき、開くと 1 時間ごとの段にする
 function buildRows(periods){
   const rows = periods.map(p => ({ name: p.name, s: toMin(p.start), e: toMin(p.end), start: p.start, end: p.end }));
   rows.forEach((r, i) => { if (r.e == null) r.e = (rows[i+1] && rows[i+1].s != null) ? rows[i+1].s : 24*60; });
   rows.forEach((r, i) => { if (r.s == null) r.s = i > 0 ? rows[i-1].e : 0; });
+  if (!rows.length) return rows;
+  const last = rows[rows.length - 1];
+  last.after = true;
+  last.fold = 'late';
+  if (openLate) {
+    if (last.e === 24*60) { last.e = Math.min(24*60, (Math.floor(last.s/60) + 1) * 60); last.end = fmtMin(last.e); }
+    rows.push(...hourRows(last.e, 24*60).map(r => Object.assign(r, { late: true })));
+  }
+  const first = rows[0];
+  if (first.s > 0) {
+    if (openEarly) {
+      const h = hourRows(0, first.s);
+      h[0].fold = 'early';
+      rows.unshift(...h);
+    } else {
+      rows.unshift({ name: '0時〜', s: 0, e: first.s, start: '0:00', end: first.start, kind: 'fold', fold: 'early' });
+    }
+  }
   return rows;
 }
 
@@ -189,9 +227,11 @@ function place(data, rows){
 }
 
 let lastData = null;
+let shown = null;
 
 function render(data, loading){
   if (!loading) lastData = data;
+  shown = { data, loading };
   const rows = buildRows(data.periods);
   const { allDay, timed, calMap, work } = place(data, rows);
   const tt = {};
@@ -243,19 +283,27 @@ function render(data, loading){
     rows.forEach((r, ri) => {
       const l = document.createElement('div');
       l.className = 'lab';
-      l.innerHTML = esc(r.name) + (r.start ? '<small>' + esc(r.start) + '</small>' : '');
+      if (r.fold) {
+        const open = r.fold === 'early' ? openEarly : openLate;
+        l.classList.add('tog');
+        l.innerHTML = esc(r.name) + '<small>' + (r.kind === 'hour' ? '' : esc(r.start) + ' ') + (open ? '▾' : '▸') + '</small>';
+        l.addEventListener('click', () => toggle(r.fold));
+      } else {
+        l.innerHTML = esc(r.name) + (r.start && r.kind !== 'hour' ? '<small>' + esc(r.start) + '</small>' : '');
+      }
       g.appendChild(l);
-      const short = r.name === '朝' || r.name.startsWith('昼');
+      const short = r.name === '朝' || r.name.startsWith('昼') || r.kind === 'fold';
       keys.forEach((k, i) => {
         const c = document.createElement('div');
         const we = i === 0 || i === 6;
-        c.className = 'cell' + (we ? ' we' : '') + (short ? ' short' : '') + (k === todayKey ? ' today' : '');
+        c.className = 'cell' + (we ? ' we' : '') + (short ? ' short' : '') + (r.kind === 'hour' ? ' hour' : '') + (k === todayKey ? ' today' : '');
+        if ((r.after || r.late) && work[k] && r.s < toMin(work[k])) c.classList.add('work');
         const items = [], detail = [];
-        if (ri === rows.length - 1 && work[k]) {
+        if (r.after && work[k]) {
           items.push('<div class="wk">勤務〜' + esc(work[k]) + '</div>');
           detail.push({ title: '勤務は ' + work[k] + ' まで', sub: '学校の終日の予定から' });
         }
-        const t = hol[i] ? null : tt[i + '|' + r.name];
+        const t = (hol[i] || r.kind) ? null : tt[i + '|' + r.name];
         if (t) {
           items.push('<div class="it tt"><span class="one">' + esc((t.cls ? t.cls + ' ' : '') + t.subject) + '</span></div>');
           detail.push({ title: (t.cls ? t.cls + ' ' : '') + t.subject, sub: '授業' });
@@ -273,6 +321,12 @@ function render(data, loading){
     box.appendChild(g);
   }
   box.querySelectorAll('.one').forEach(fit);
+}
+
+function toggle(which){
+  if (which === 'early') { openEarly = !openEarly; store.set('gc:early', openEarly ? '1' : '0'); }
+  else { openLate = !openLate; store.set('gc:late', openLate ? '1' : '0'); }
+  if (shown) render(shown.data, shown.loading);
 }
 
 function fit(el){
@@ -369,6 +423,8 @@ function sampleData(start){
     { cal: '学校', title: '来客', allDay: false, start: at(2, 9, 40), end: at(2, 9, 50) },
     { cal: '学校', title: '研修', allDay: false, start: at(2, 9, 50), end: at(2, 12, 40) },
     { cal: '個人', title: '歯医者', allDay: false, start: at(6, 10, 0), end: at(6, 11, 0) },
+    { cal: '個人', title: 'ジム', allDay: false, start: at(4, 20, 0), end: at(4, 21, 30) },
+    { cal: '個人', title: '早朝の用事', allDay: false, start: at(5, 6, 30), end: at(5, 7, 30) },
     { cal: '学校', title: '6) 期末考査', allDay: true, start: ymd(addDays(start, 2)), end: ymd(addDays(start, 3)) },
     { cal: '学校', title: '10) 職員会議、学年の行事', allDay: true, start: ymd(addDays(start, 3)), end: ymd(addDays(start, 4)) },
     { cal: '学校', title: '8)', allDay: true, start: ymd(addDays(start, 4)), end: ymd(addDays(start, 5)) },
@@ -412,7 +468,7 @@ $('weeks').addEventListener('touchend', e => {
 let resizeTimer = null;
 window.addEventListener('resize', () => {
   clearTimeout(resizeTimer);
-  resizeTimer = setTimeout(() => { if (lastData) render(lastData); }, 200);
+  resizeTimer = setTimeout(() => { if (shown) render(shown.data, shown.loading); }, 200);
 });
 
 load(false);
