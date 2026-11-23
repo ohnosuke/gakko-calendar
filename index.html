@@ -1,0 +1,331 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="校時">
+<meta name="theme-color" content="#ffffff">
+<title>校時カレンダー</title>
+<style>
+:root{
+  --bg:#ffffff; --fg:#1f1f1d; --sub:#6b6a65; --muted:#a3a29b; --line:#e4e2da; --empty:#f3f2ed;
+  --today:#fff6d6;
+  --tt-bg:#e1f5ee; --tt-fg:#085041;
+  --c0-bg:#faece7; --c0-fg:#712b13;
+  --c1-bg:#e6f1fb; --c1-fg:#0c447c;
+  --c2-bg:#fbeaf0; --c2-fg:#72243e;
+  --hol-bg:#eeedfe; --hol-fg:#3c3489;
+}
+@media (prefers-color-scheme: dark){
+  :root{
+    --bg:#1c1c1a; --fg:#ecebe6; --sub:#a3a29b; --muted:#6b6a65; --line:#3a3936; --empty:#262624;
+    --today:#3a3320;
+    --tt-bg:#085041; --tt-fg:#e1f5ee;
+    --c0-bg:#712b13; --c0-fg:#faece7;
+    --c1-bg:#0c447c; --c1-fg:#e6f1fb;
+    --c2-bg:#72243e; --c2-fg:#fbeaf0;
+    --hol-bg:#3c3489; --hol-fg:#eeedfe;
+  }
+}
+*{box-sizing:border-box}
+html,body{margin:0;background:var(--bg);color:var(--fg);font-family:-apple-system,BlinkMacSystemFont,"Hiragino Sans","Yu Gothic UI","Meiryo",sans-serif;-webkit-text-size-adjust:100%}
+body{padding:calc(env(safe-area-inset-top) + 8px) 6px calc(env(safe-area-inset-bottom) + 72px)}
+main{max-width:760px;margin:0 auto}
+header{display:flex;align-items:center;gap:6px;margin-bottom:6px;flex-wrap:wrap}
+header h1{font-size:14px;font-weight:600;margin:0 auto 0 2px}
+button{font:inherit;font-size:12px;color:var(--fg);background:transparent;border:1px solid var(--line);border-radius:6px;padding:5px 9px;cursor:pointer}
+button:active{transform:scale(.97)}
+#status{font-size:10px;color:var(--sub);margin:0 2px 8px;min-height:13px}
+#status.err{color:#c0392b}
+details#settings{border:1px solid var(--line);border-radius:8px;padding:8px 10px;margin-bottom:10px;font-size:12px}
+details#settings summary{cursor:pointer;color:var(--sub)}
+details#settings label{display:block;margin:8px 0 2px;color:var(--sub)}
+details#settings input{width:100%;font:inherit;font-size:14px;padding:6px;border:1px solid var(--line);border-radius:6px;background:var(--bg);color:var(--fg)}
+details#settings p{color:var(--sub);font-size:11px;margin:8px 0}
+.week{display:grid;grid-template-columns:30px minmax(0,.5fr) repeat(5,minmax(0,1fr)) minmax(0,.5fr);gap:2px;margin-bottom:14px;font-size:10px}
+.lab{color:var(--sub);text-align:right;padding-right:3px;display:flex;flex-direction:column;justify-content:center;line-height:1.1}
+.lab small{font-size:9px;color:var(--muted)}
+.dh{text-align:center;line-height:1.2;padding:2px 0;border-radius:4px}
+.dh.we{color:var(--muted)}
+.dh.today{background:var(--today);font-weight:600}
+.dh.hol{color:var(--hol-fg)}
+.cell{border-radius:4px;min-height:30px;background:var(--empty);display:flex;flex-direction:column;gap:1px;overflow:hidden;cursor:pointer}
+.cell.we{background:transparent;border:1px dashed var(--line)}
+.cell.lunch{min-height:12px}
+.cell.ad{background:transparent;min-height:14px;cursor:default}
+.cell.ad.has{cursor:pointer}
+.cell.today{outline:1.5px solid var(--today)}
+.it{flex:1;border-radius:3px;padding:1px 2px;display:flex;flex-direction:column;justify-content:center;text-align:center;line-height:1.15;word-break:break-all;overflow:hidden}
+.it.tt{background:var(--tt-bg);color:var(--tt-fg)}
+.it.c0{background:var(--c0-bg);color:var(--c0-fg)}
+.it.c1{background:var(--c1-bg);color:var(--c1-fg)}
+.it.c2{background:var(--c2-bg);color:var(--c2-fg)}
+.it.hol{background:var(--hol-bg);color:var(--hol-fg)}
+.it.dim{opacity:.4}
+.it.cont{flex:0 0 6px}
+.ad .it{flex:none;padding:1px 2px}
+.legend{display:flex;gap:10px;flex-wrap:wrap;justify-content:center;font-size:10px;color:var(--sub);margin:4px 0 12px}
+.legend span::before{content:"";display:inline-block;width:9px;height:9px;border-radius:2px;margin-right:3px;vertical-align:-1px;background:var(--sw)}
+#sheet{position:fixed;left:0;right:0;bottom:0;background:var(--bg);border-top:1px solid var(--line);padding:10px 14px calc(env(safe-area-inset-bottom) + 12px);font-size:13px;display:none;max-height:45vh;overflow:auto;box-shadow:0 -4px 16px rgba(0,0,0,.08)}
+#sheet.open{display:block}
+#sheet h2{font-size:13px;margin:0 0 6px;display:flex;justify-content:space-between;align-items:center}
+#sheet ul{list-style:none;margin:0;padding:0}
+#sheet li{padding:5px 0;border-top:1px solid var(--line)}
+#sheet li small{color:var(--sub);display:block;font-size:11px}
+</style>
+</head>
+<body>
+<main>
+  <header>
+    <h1>校時カレンダー</h1>
+    <button id="prev" aria-label="前の週">◀</button>
+    <button id="today">今週</button>
+    <button id="next" aria-label="次の週">▶</button>
+    <button id="reload">更新</button>
+  </header>
+  <div id="status"></div>
+  <details id="settings">
+    <summary>設定</summary>
+    <label for="url">GAS の Web アプリの URL</label>
+    <input id="url" type="url" autocomplete="off" spellcheck="false" placeholder="https://script.google.com/macros/s/…/exec">
+    <label for="token">合言葉</label>
+    <input id="token" type="password" autocomplete="off" spellcheck="false">
+    <p>この 2 つは、この機械のブラウザにだけ覚えさせます。どこにも送りません（GAS を呼ぶときに付けるだけです）。</p>
+    <button id="save">保存して読み込む</button>
+  </details>
+  <div id="legend" class="legend"></div>
+  <div id="weeks"></div>
+</main>
+<div id="sheet"><h2><span id="sheet-title"></span><button id="sheet-close">閉じる</button></h2><ul id="sheet-list"></ul></div>
+<script>
+const WEEKS = 3;
+const W = ['日','月','火','水','木','金','土'];
+const SAMPLE = new URLSearchParams(location.search).has('sample');
+const store = {
+  get(k){ try { return localStorage.getItem(k); } catch (e) { return null; } },
+  set(k, v){ try { localStorage.setItem(k, v); } catch (e) {} },
+};
+const $ = id => document.getElementById(id);
+let offset = 0;
+let cells = [];
+
+function dayOf(d){ return new Date(d.getFullYear(), d.getMonth(), d.getDate()); }
+function addDays(d, n){ return new Date(d.getFullYear(), d.getMonth(), d.getDate() + n); }
+function sundayOf(d){ return addDays(dayOf(d), -d.getDay()); }
+function ymd(d){ return d.getFullYear() + '-' + String(d.getMonth()+1).padStart(2,'0') + '-' + String(d.getDate()).padStart(2,'0'); }
+function parseYmd(s){ const [y,m,d] = s.split('-').map(Number); return new Date(y, m-1, d); }
+function toMin(s){ const m = /^(\d{1,2}):(\d{2})/.exec(s || ''); return m ? (+m[1])*60 + (+m[2]) : null; }
+function hm(d){ return d.getHours() + ':' + String(d.getMinutes()).padStart(2,'0'); }
+function md(d){ return (d.getMonth()+1) + '/' + d.getDate(); }
+function push(obj, key, v){ (obj[key] = obj[key] || []).push(v); }
+function esc(s){ return String(s).replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c])); }
+
+function startDate(){ return addDays(sundayOf(new Date()), offset * 7); }
+
+function buildRows(periods){
+  const rows = periods.map(p => ({ name: p.name, s: toMin(p.start), e: toMin(p.end), start: p.start, end: p.end }));
+  rows.forEach((r, i) => { if (r.e == null) r.e = (rows[i+1] && rows[i+1].s != null) ? rows[i+1].s : 24*60; });
+  rows.forEach((r, i) => { if (r.s == null) r.s = i > 0 ? rows[i-1].e : 0; });
+  return rows;
+}
+
+function calClass(label, map){
+  if (label === '祝日') return 'hol';
+  if (!(label in map)) map[label] = 'c' + (Object.keys(map).length % 3);
+  return map[label];
+}
+
+function place(data, rows){
+  const allDay = {}, timed = {}, calMap = {};
+  data.events.forEach(ev => {
+    ev.cls = calClass(ev.cal, calMap);
+    if (ev.allDay) {
+      for (let d = parseYmd(ev.start), end = parseYmd(ev.end); d < end; d = addDays(d, 1)) push(allDay, ymd(d), ev);
+      return;
+    }
+    const s = new Date(ev.start);
+    let e = new Date(ev.end);
+    if (e <= s) e = new Date(s.getTime() + 60000);
+    ev.label = hm(s) + '〜' + hm(e);
+    let first = true;
+    const last = dayOf(new Date(e.getTime() - 1));
+    for (let d = dayOf(s); d <= last; d = addDays(d, 1)) {
+      const base = d.getTime();
+      const sm = Math.max(0, (s - base) / 60000), em = Math.min(1440, (e - base) / 60000);
+      let hit = [];
+      rows.forEach((r, i) => { if (sm < r.e && em > r.s) hit.push(i); });
+      if (!hit.length) hit = [em <= rows[0].s ? 0 : rows.length - 1];
+      const k = ymd(d);
+      timed[k] = timed[k] || {};
+      hit.forEach(i => { push(timed[k], i, { ev, first }); first = false; });
+    }
+  });
+  return { allDay, timed, calMap };
+}
+
+function render(data){
+  const rows = buildRows(data.periods);
+  const { allDay, timed, calMap } = place(data, rows);
+  const tt = {};
+  data.timetable.forEach(t => { tt[t.day + '|' + t.period] = t; });
+  const start = parseYmd(data.start);
+  const todayKey = ymd(new Date());
+  const box = $('weeks');
+  box.innerHTML = '';
+  cells = [];
+
+  const lg = ['<span style="--sw:var(--tt-bg)">授業</span>'];
+  Object.entries(calMap).forEach(([label, c]) => lg.push('<span style="--sw:var(--' + c + '-bg)">' + esc(label) + '</span>'));
+  if (data.events.some(e => e.cal === '祝日')) lg.push('<span style="--sw:var(--hol-bg)">祝日</span>');
+  $('legend').innerHTML = lg.join('');
+
+  for (let w = 0; w < data.days / 7; w++) {
+    const g = document.createElement('div');
+    g.className = 'week';
+    const dates = [];
+    for (let i = 0; i < 7; i++) dates.push(addDays(start, w*7 + i));
+    const keys = dates.map(ymd);
+    const hol = keys.map(k => (allDay[k] || []).some(e => e.cal === '祝日'));
+
+    g.appendChild(document.createElement('div'));
+    dates.forEach((d, i) => {
+      const h = document.createElement('div');
+      const we = i === 0 || i === 6;
+      h.className = 'dh' + (we ? ' we' : '') + (keys[i] === todayKey ? ' today' : '') + (hol[i] ? ' hol' : '');
+      h.innerHTML = (we ? d.getDate() : md(d)) + '<br>' + W[i];
+      g.appendChild(h);
+    });
+
+    const adl = document.createElement('div');
+    adl.className = 'lab';
+    adl.textContent = '終日';
+    g.appendChild(adl);
+    keys.forEach((k, i) => {
+      const c = document.createElement('div');
+      c.className = 'cell ad';
+      const evs = allDay[k] || [];
+      if (evs.length) {
+        c.classList.add('has');
+        c.innerHTML = evs.map(e => '<div class="it ' + e.cls + '">' + esc(e.title) + '</div>').join('');
+        bind(c, dates[i], '終日', evs.map(e => ({ title: e.title, sub: '終日・' + e.cal })));
+      }
+      g.appendChild(c);
+    });
+
+    rows.forEach((r, ri) => {
+      const l = document.createElement('div');
+      l.className = 'lab';
+      l.innerHTML = esc(r.name) + (r.start ? '<small>' + esc(r.start) + '</small>' : '');
+      g.appendChild(l);
+      const lunch = r.name === '昼';
+      keys.forEach((k, i) => {
+        const c = document.createElement('div');
+        const we = i === 0 || i === 6;
+        c.className = 'cell' + (we ? ' we' : '') + (lunch ? ' lunch' : '') + (k === todayKey ? ' today' : '');
+        const items = [], detail = [];
+        ((timed[k] || {})[ri] || []).forEach(({ ev, first }) => {
+          items.push('<div class="it ' + ev.cls + (first ? '' : ' cont') + '">' + (first ? esc(ev.title) : '') + '</div>');
+          detail.push({ title: ev.title, sub: ev.label + '・' + ev.cal });
+        });
+        const t = tt[i + '|' + r.name];
+        if (t) {
+          items.push('<div class="it tt' + (hol[i] ? ' dim' : '') + '">' + (t.cls ? '<span>' + esc(t.cls) + '</span>' : '') + '<span>' + esc(t.subject) + '</span></div>');
+          detail.push({ title: (t.cls ? t.cls + ' ' : '') + t.subject, sub: '授業' + (hol[i] ? '（祝日）' : '') });
+        }
+        c.innerHTML = items.join('');
+        const time = r.start ? r.start + (r.end ? '〜' + r.end : '〜') : '';
+        bind(c, dates[i], r.name + (/^\d+$/.test(r.name) ? '限' : '') + (time ? ' ' + time : ''), detail);
+        g.appendChild(c);
+      });
+    });
+    box.appendChild(g);
+  }
+}
+
+function bind(el, date, slot, detail){
+  el.addEventListener('click', () => {
+    $('sheet-title').textContent = md(date) + '（' + W[date.getDay()] + '） ' + slot;
+    $('sheet-list').innerHTML = detail.length
+      ? detail.map(d => '<li>' + esc(d.title) + '<small>' + esc(d.sub) + '</small></li>').join('')
+      : '<li>空き</li>';
+    $('sheet').classList.add('open');
+  });
+}
+
+function status(msg, err){ const s = $('status'); s.textContent = msg; s.className = err ? 'err' : ''; }
+
+function cacheKey(start){ return 'gc:' + ymd(start); }
+
+async function load(fresh){
+  const start = startDate();
+  const cached = SAMPLE ? null : store.get(cacheKey(start));
+  if (cached && !fresh) {
+    try { const d = JSON.parse(cached); render(d); status('前に取った分を表示中（' + when(d.generated) + '）… 読み込んでいます'); } catch (e) {}
+  } else {
+    status('読み込んでいます…');
+  }
+  try {
+    const data = SAMPLE ? sampleData(start) : await fetchData(start, fresh);
+    if (data.error) throw new Error(data.error === 'unauthorized' ? '合言葉が合いません。設定を見てください' : data.error);
+    if (!SAMPLE) store.set(cacheKey(start), JSON.stringify(data));
+    if (startDate().getTime() !== start.getTime()) return;
+    render(data);
+    status((SAMPLE ? '試しのデータ・' : '') + when(data.generated) + ' 時点' + (data.warnings && data.warnings.length ? '（注意: ' + data.warnings.join(' / ') + '）' : ''));
+  } catch (e) {
+    status((cached ? '新しい分を取れませんでした（前に取った分を表示中）: ' : '読み込めませんでした: ') + e.message, true);
+  }
+}
+
+async function fetchData(start, fresh){
+  const url = store.get('gc:url'), token = store.get('gc:token');
+  if (!url || !token) { $('settings').open = true; throw new Error('設定で GAS の URL と合言葉を入れてください'); }
+  const q = new URLSearchParams({ token, start: ymd(start), weeks: String(WEEKS) });
+  if (fresh) q.set('fresh', '1');
+  const res = await fetch(url + (url.includes('?') ? '&' : '?') + q.toString());
+  if (!res.ok) throw new Error('GAS が ' + res.status + ' を返しました');
+  return res.json();
+}
+
+function when(iso){ if (!iso) return ''; const d = new Date(iso); return md(d) + ' ' + hm(d); }
+
+function sampleData(start){
+  const periods = [['朝','8:30','8:50'],['1','8:50','9:40'],['2','9:50','10:40'],['3','10:50','11:40'],['4','11:50','12:40'],['昼','12:40','13:25'],['5','13:25','14:15'],['6','14:25','15:15'],['放課後','15:15','']]
+    .map(([name, s, e]) => ({ name, start: s, end: e }));
+  const timetable = [
+    [1,'1','3-3','美術1'],[1,'3','3-1','美術1'],[1,'6','選択3年','美術'],
+    [2,'2','2-1','美術1'],[2,'4','3-3','美術1'],[2,'5','選択1年','eスポーツ'],
+    [3,'1','3-1','美術1'],[3,'6','2-1','美術1'],
+    [4,'2','選択3年','美術'],[4,'5','3-3','美術1'],[4,'6','選択1年','eスポーツ'],
+    [5,'3','2-1','美術1'],[5,'4','3-1','美術1'],
+  ].map(([day, period, cls, subject]) => ({ day, period, cls, subject }));
+  const at = (n, h, m) => { const d = addDays(start, n); d.setHours(h, m); return d.toISOString(); };
+  const events = [
+    { cal: '学校', title: '職員朝礼', allDay: false, start: at(1, 8, 30), end: at(1, 8, 40) },
+    { cal: '学校', title: '職員会議', allDay: false, start: at(3, 15, 40), end: at(3, 17, 0) },
+    { cal: '学校', title: '学年集会', allDay: false, start: at(4, 14, 25), end: at(4, 15, 15) },
+    { cal: '学校', title: '研修', allDay: false, start: at(9, 9, 50), end: at(9, 12, 40) },
+    { cal: '個人', title: '歯医者', allDay: false, start: at(6, 10, 0), end: at(6, 11, 0) },
+    { cal: '学校', title: '期末テスト', allDay: true, start: ymd(addDays(start, 15)), end: ymd(addDays(start, 19)) },
+    { cal: '祝日', title: '祝日の例', allDay: true, start: ymd(addDays(start, 8)), end: ymd(addDays(start, 9)) },
+  ];
+  return { generated: new Date().toISOString(), start: ymd(start), days: WEEKS * 7, periods, timetable, events, warnings: [] };
+}
+
+$('url').value = store.get('gc:url') || '';
+$('token').value = store.get('gc:token') || '';
+$('save').addEventListener('click', () => {
+  store.set('gc:url', $('url').value.trim());
+  store.set('gc:token', $('token').value.trim());
+  $('settings').open = false;
+  load(true);
+});
+$('prev').addEventListener('click', () => { offset--; load(false); });
+$('next').addEventListener('click', () => { offset++; load(false); });
+$('today').addEventListener('click', () => { offset = 0; load(false); });
+$('reload').addEventListener('click', () => load(true));
+$('sheet-close').addEventListener('click', () => $('sheet').classList.remove('open'));
+load(false);
+</script>
+</body>
+</html>
