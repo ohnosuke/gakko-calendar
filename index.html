@@ -5,7 +5,8 @@
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-title" content="校時">
-<meta name="theme-color" content="#ffffff">
+<meta name="theme-color" content="#ffffff" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#1c1c1a" media="(prefers-color-scheme: dark)">
 <title>校時カレンダー</title>
 <style>
 :root{
@@ -130,9 +131,10 @@ function buildRows(periods){
   return rows;
 }
 
+const CAL_COLOR = { '学校': 'c0', '個人': 'c1' };
 function calClass(label, map){
   if (label === '祝日') return 'hol';
-  if (!(label in map)) map[label] = 'c' + (Object.keys(map).length % 3);
+  map[label] = CAL_COLOR[label] || 'c2';
   return map[label];
 }
 
@@ -155,7 +157,11 @@ function place(data, rows){
       const sm = Math.max(0, (s - base) / 60000), em = Math.min(1440, (e - base) / 60000);
       let hit = [];
       rows.forEach((r, i) => { if (sm < r.e && em > r.s) hit.push(i); });
-      if (!hit.length) hit = [em <= rows[0].s ? 0 : rows.length - 1];
+      if (!hit.length) {
+        let j = 0;
+        rows.forEach((r, i) => { if (r.s <= sm) j = i; });
+        hit = [j];
+      }
       const k = ymd(d);
       timed[k] = timed[k] || {};
       hit.forEach(i => { push(timed[k], i, { ev, first }); first = false; });
@@ -218,7 +224,7 @@ function render(data){
       l.className = 'lab';
       l.innerHTML = esc(r.name) + (r.start ? '<small>' + esc(r.start) + '</small>' : '');
       g.appendChild(l);
-      const lunch = r.name === '昼';
+      const lunch = r.name.startsWith('昼');
       keys.forEach((k, i) => {
         const c = document.createElement('div');
         const we = i === 0 || i === 6;
@@ -257,6 +263,16 @@ function status(msg, err){ const s = $('status'); s.textContent = msg; s.classNa
 
 function cacheKey(start){ return 'gc:' + ymd(start); }
 
+function prune(){
+  try {
+    const keep = ymd(addDays(sundayOf(new Date()), -28));
+    for (let i = localStorage.length - 1; i >= 0; i--) {
+      const k = localStorage.key(i);
+      if (/^gc:\d{4}-\d{2}-\d{2}$/.test(k) && k.slice(3) < keep) localStorage.removeItem(k);
+    }
+  } catch (e) {}
+}
+
 async function load(fresh){
   const start = startDate();
   const cached = SAMPLE ? null : store.get(cacheKey(start));
@@ -268,7 +284,7 @@ async function load(fresh){
   try {
     const data = SAMPLE ? sampleData(start) : await fetchData(start, fresh);
     if (data.error) throw new Error(data.error === 'unauthorized' ? '合言葉が合いません。設定を見てください' : data.error);
-    if (!SAMPLE) store.set(cacheKey(start), JSON.stringify(data));
+    if (!SAMPLE) { store.set(cacheKey(start), JSON.stringify(data)); prune(); }
     if (startDate().getTime() !== start.getTime()) return;
     render(data);
     status((SAMPLE ? '試しのデータ・' : '') + when(data.generated) + ' 時点' + (data.warnings && data.warnings.length ? '（注意: ' + data.warnings.join(' / ') + '）' : ''));
@@ -304,6 +320,7 @@ function sampleData(start){
     { cal: '学校', title: '職員朝礼', allDay: false, start: at(1, 8, 30), end: at(1, 8, 40) },
     { cal: '学校', title: '職員会議', allDay: false, start: at(3, 15, 40), end: at(3, 17, 0) },
     { cal: '学校', title: '学年集会', allDay: false, start: at(4, 14, 25), end: at(4, 15, 15) },
+    { cal: '学校', title: '来客', allDay: false, start: at(2, 9, 40), end: at(2, 9, 50) },
     { cal: '学校', title: '研修', allDay: false, start: at(9, 9, 50), end: at(9, 12, 40) },
     { cal: '個人', title: '歯医者', allDay: false, start: at(6, 10, 0), end: at(6, 11, 0) },
     { cal: '学校', title: '期末テスト', allDay: true, start: ymd(addDays(start, 15)), end: ymd(addDays(start, 19)) },
