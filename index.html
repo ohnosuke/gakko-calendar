@@ -51,14 +51,16 @@ details#settings p{color:var(--sub);font-size:11px;margin:8px 0}
 .dh.we{color:var(--muted)}
 .dh.today{background:var(--today);font-weight:600}
 .dh.hol{color:var(--hol-fg)}
-.cell{border-radius:4px;min-height:30px;background:var(--empty);display:flex;flex-direction:column;gap:1px;overflow:hidden;cursor:pointer}
+.cell{border-radius:4px;min-height:44px;background:var(--empty);display:flex;flex-direction:column;gap:1px;overflow:hidden;cursor:pointer}
 .cell.we{background:transparent;border:1px dashed var(--line)}
-.cell.lunch{min-height:12px}
+.cell.short{min-height:14px}
 .cell.ad{background:transparent;min-height:14px;cursor:default}
 .cell.ad.has{cursor:pointer}
 .cell.today{outline:1.5px solid var(--today)}
 .it{flex:1;border-radius:3px;padding:1px 2px;display:flex;flex-direction:column;justify-content:center;text-align:center;line-height:1.15;word-break:break-all;overflow:hidden}
 .it.tt{background:var(--tt-bg);color:var(--tt-fg)}
+.it .one{display:block;white-space:nowrap;overflow:hidden;font-size:9px}
+.week.loading .it{opacity:.55}
 .it.c0{background:var(--c0-bg);color:var(--c0-fg)}
 .it.c1{background:var(--c1-bg);color:var(--c1-fg)}
 .it.c2{background:var(--c2-bg);color:var(--c2-fg)}
@@ -70,7 +72,7 @@ details#settings p{color:var(--sub);font-size:11px;margin:8px 0}
 .legend span::before{content:"";display:inline-block;width:9px;height:9px;border-radius:2px;margin-right:3px;vertical-align:-1px;background:var(--sw)}
 #sheet{position:fixed;left:0;right:0;bottom:0;background:var(--bg);border-top:1px solid var(--line);padding:10px 14px calc(env(safe-area-inset-bottom) + 12px);font-size:13px;display:none;max-height:45vh;overflow:auto;box-shadow:0 -4px 16px rgba(0,0,0,.08)}
 #sheet.open{display:block}
-#sheet h2{font-size:13px;margin:0 0 6px;display:flex;justify-content:space-between;align-items:center}
+#sheet h2{font-size:13px;margin:0 0 6px;display:flex;justify-content:flex-start;align-items:center;gap:10px}
 #sheet ul{list-style:none;margin:0;padding:0}
 #sheet li{padding:5px 0;border-top:1px solid var(--line)}
 #sheet li small{color:var(--sub);display:block;font-size:11px}
@@ -98,9 +100,9 @@ details#settings p{color:var(--sub);font-size:11px;margin:8px 0}
   <div id="legend" class="legend"></div>
   <div id="weeks"></div>
 </main>
-<div id="sheet"><h2><span id="sheet-title"></span><button id="sheet-close">閉じる</button></h2><ul id="sheet-list"></ul></div>
+<div id="sheet"><h2><button id="sheet-close">閉じる</button><span id="sheet-title"></span></h2><ul id="sheet-list"></ul></div>
 <script>
-const WEEKS = 3;
+const WEEKS = 1;
 const W = ['日','月','火','水','木','金','土'];
 const SAMPLE = new URLSearchParams(location.search).has('sample');
 const store = {
@@ -170,7 +172,10 @@ function place(data, rows){
   return { allDay, timed, calMap };
 }
 
-function render(data){
+let lastData = null;
+
+function render(data, loading){
+  if (!loading) lastData = data;
   const rows = buildRows(data.periods);
   const { allDay, timed, calMap } = place(data, rows);
   const tt = {};
@@ -188,7 +193,7 @@ function render(data){
 
   for (let w = 0; w < data.days / 7; w++) {
     const g = document.createElement('div');
-    g.className = 'week';
+    g.className = 'week' + (loading ? ' loading' : '');
     const dates = [];
     for (let i = 0; i < 7; i++) dates.push(addDays(start, w*7 + i));
     const keys = dates.map(ymd);
@@ -224,21 +229,21 @@ function render(data){
       l.className = 'lab';
       l.innerHTML = esc(r.name) + (r.start ? '<small>' + esc(r.start) + '</small>' : '');
       g.appendChild(l);
-      const lunch = r.name.startsWith('昼');
+      const short = r.name === '朝' || r.name.startsWith('昼');
       keys.forEach((k, i) => {
         const c = document.createElement('div');
         const we = i === 0 || i === 6;
-        c.className = 'cell' + (we ? ' we' : '') + (lunch ? ' lunch' : '') + (k === todayKey ? ' today' : '');
+        c.className = 'cell' + (we ? ' we' : '') + (short ? ' short' : '') + (k === todayKey ? ' today' : '');
         const items = [], detail = [];
+        const t = hol[i] ? null : tt[i + '|' + r.name];
+        if (t) {
+          items.push('<div class="it tt"><span class="one">' + esc((t.cls ? t.cls + ' ' : '') + t.subject) + '</span></div>');
+          detail.push({ title: (t.cls ? t.cls + ' ' : '') + t.subject, sub: '授業' });
+        }
         ((timed[k] || {})[ri] || []).forEach(({ ev, first }) => {
           items.push('<div class="it ' + ev.cls + (first ? '' : ' cont') + '">' + (first ? esc(ev.title) : '') + '</div>');
           detail.push({ title: ev.title, sub: ev.label + '・' + ev.cal });
         });
-        const t = tt[i + '|' + r.name];
-        if (t) {
-          items.push('<div class="it tt' + (hol[i] ? ' dim' : '') + '">' + (t.cls ? '<span>' + esc(t.cls) + '</span>' : '') + '<span>' + esc(t.subject) + '</span></div>');
-          detail.push({ title: (t.cls ? t.cls + ' ' : '') + t.subject, sub: '授業' + (hol[i] ? '（祝日）' : '') });
-        }
         c.innerHTML = items.join('');
         const time = r.start ? r.start + (r.end ? '〜' + r.end : '〜') : '';
         bind(c, dates[i], r.name + (/^\d+$/.test(r.name) ? '限' : '') + (time ? ' ' + time : ''), detail);
@@ -247,6 +252,14 @@ function render(data){
     });
     box.appendChild(g);
   }
+  box.querySelectorAll('.one').forEach(fit);
+}
+
+function fit(el){
+  let size = 9;
+  el.style.fontSize = size + 'px';
+  while (el.scrollWidth > el.clientWidth && size > 6) { size -= 0.5; el.style.fontSize = size + 'px'; }
+  if (el.scrollWidth > el.clientWidth) el.style.whiteSpace = 'normal';
 }
 
 function bind(el, date, slot, detail){
@@ -261,14 +274,15 @@ function bind(el, date, slot, detail){
 
 function status(msg, err){ const s = $('status'); s.textContent = msg; s.className = err ? 'err' : ''; }
 
-function cacheKey(start){ return 'gc:' + ymd(start); }
+function cacheKey(start){ return 'gc1:' + ymd(start); }
 
 function prune(){
   try {
     const keep = ymd(addDays(sundayOf(new Date()), -28));
     for (let i = localStorage.length - 1; i >= 0; i--) {
       const k = localStorage.key(i);
-      if (/^gc:\d{4}-\d{2}-\d{2}$/.test(k) && k.slice(3) < keep) localStorage.removeItem(k);
+      if (/^gc:\d{4}-\d{2}-\d{2}$/.test(k)) localStorage.removeItem(k);
+      else if (/^gc1:\d{4}-\d{2}-\d{2}$/.test(k) && k.slice(4) < keep) localStorage.removeItem(k);
     }
   } catch (e) {}
 }
@@ -279,7 +293,8 @@ async function load(fresh){
   if (cached && !fresh) {
     try { const d = JSON.parse(cached); render(d); status('前に取った分を表示中（' + when(d.generated) + '）… 読み込んでいます'); } catch (e) {}
   } else {
-    status('読み込んでいます…');
+    if (lastData && !fresh) render(Object.assign({}, lastData, { start: ymd(start), events: [] }), true);
+    status('読み込み中…');
   }
   try {
     const data = SAMPLE ? sampleData(start) : await fetchData(start, fresh);
@@ -288,8 +303,19 @@ async function load(fresh){
     if (startDate().getTime() !== start.getTime()) return;
     render(data);
     status((SAMPLE ? '試しのデータ・' : '') + when(data.generated) + ' 時点' + (data.warnings && data.warnings.length ? '（注意: ' + data.warnings.join(' / ') + '）' : ''));
+    prefetch(start);
   } catch (e) {
+    if (startDate().getTime() !== start.getTime()) return;
     status((cached ? '新しい分を取れませんでした（前に取った分を表示中）: ' : '読み込めませんでした: ') + e.message, true);
+  }
+}
+
+async function prefetch(start){
+  if (SAMPLE) return;
+  for (const n of [7, -7]) {
+    const s = addDays(start, n);
+    if (store.get(cacheKey(s))) continue;
+    try { const d = await fetchData(s, false); if (!d.error) store.set(cacheKey(s), JSON.stringify(d)); } catch (e) {}
   }
 }
 
@@ -321,10 +347,10 @@ function sampleData(start){
     { cal: '学校', title: '職員会議', allDay: false, start: at(3, 15, 40), end: at(3, 17, 0) },
     { cal: '学校', title: '学年集会', allDay: false, start: at(4, 14, 25), end: at(4, 15, 15) },
     { cal: '学校', title: '来客', allDay: false, start: at(2, 9, 40), end: at(2, 9, 50) },
-    { cal: '学校', title: '研修', allDay: false, start: at(9, 9, 50), end: at(9, 12, 40) },
+    { cal: '学校', title: '研修', allDay: false, start: at(2, 9, 50), end: at(2, 12, 40) },
     { cal: '個人', title: '歯医者', allDay: false, start: at(6, 10, 0), end: at(6, 11, 0) },
-    { cal: '学校', title: '期末テスト', allDay: true, start: ymd(addDays(start, 15)), end: ymd(addDays(start, 19)) },
-    { cal: '祝日', title: '祝日の例', allDay: true, start: ymd(addDays(start, 8)), end: ymd(addDays(start, 9)) },
+    { cal: '学校', title: '模試', allDay: true, start: ymd(addDays(start, 5)), end: ymd(addDays(start, 6)) },
+    { cal: '祝日', title: '祝日の例', allDay: true, start: ymd(addDays(start, 1)), end: ymd(addDays(start, 2)) },
   ];
   return { generated: new Date().toISOString(), start: ymd(start), days: WEEKS * 7, periods, timetable, events, warnings: [] };
 }
@@ -342,6 +368,30 @@ $('next').addEventListener('click', () => { offset++; load(false); });
 $('today').addEventListener('click', () => { offset = 0; load(false); });
 $('reload').addEventListener('click', () => load(true));
 $('sheet-close').addEventListener('click', () => $('sheet').classList.remove('open'));
+
+let touch = null;
+$('weeks').addEventListener('touchstart', e => {
+  const t = e.touches[0];
+  touch = { x: t.clientX, y: t.clientY };
+}, { passive: true });
+$('weeks').addEventListener('touchend', e => {
+  if (!touch) return;
+  const t = e.changedTouches[0];
+  const dx = t.clientX - touch.x, dy = t.clientY - touch.y;
+  touch = null;
+  if (Math.abs(dx) > 60 && Math.abs(dx) > Math.abs(dy) * 1.5) {
+    offset += dx < 0 ? 1 : -1;
+    $('sheet').classList.remove('open');
+    load(false);
+  }
+}, { passive: true });
+
+let resizeTimer = null;
+window.addEventListener('resize', () => {
+  clearTimeout(resizeTimer);
+  resizeTimer = setTimeout(() => { if (lastData) render(lastData); }, 200);
+});
+
 load(false);
 </script>
 </body>
