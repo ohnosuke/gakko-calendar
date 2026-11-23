@@ -58,6 +58,8 @@ details#settings p{color:var(--sub);font-size:11px;margin:8px 0}
 .cell{border-radius:4px;min-height:44px;background:var(--empty);display:flex;flex-direction:column;gap:1px;overflow:hidden;cursor:pointer}
 .cell.we{background:transparent;border:1px dashed var(--line)}
 .cell.short{min-height:14px}
+.cell.bottom{justify-content:flex-end}
+.cell.bottom .it{flex:none}
 .cell.ad{background:transparent;min-height:14px;cursor:default}
 .cell.ad{cursor:pointer}
 .cell.today{outline:1.5px solid var(--today)}
@@ -303,7 +305,7 @@ function render(data, loading){
       keys.forEach((k, i) => {
         const c = document.createElement('div');
         const we = i === 0 || i === 6;
-        c.className = 'cell' + (we ? ' we' : '') + (short ? ' short' : '') + (r.kind === 'hour' ? ' hour' : '') + (k === todayKey ? ' today' : '');
+        c.className = 'cell' + (we ? ' we' : '') + (short ? ' short' : '') + (r.name === '朝' ? ' bottom' : '') + (r.kind === 'hour' ? ' hour' : '') + (k === todayKey ? ' today' : '');
         if ((r.after || r.late) && work[k] && r.s < toMin(work[k])) c.classList.add('work');
         const items = [], detail = [];
         const wEnd = work[k] ? toMin(work[k]) : null;
