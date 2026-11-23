@@ -36,13 +36,15 @@ html,body{margin:0;background:var(--bg);color:var(--fg);font-family:-apple-syste
 body{padding:calc(env(safe-area-inset-top) + 8px) 6px calc(env(safe-area-inset-bottom) + 72px)}
 main{max-width:760px;margin:0 auto}
 header{display:flex;align-items:center;gap:6px;margin-bottom:6px;flex-wrap:wrap}
-header h1{font-size:14px;font-weight:600;margin:0 auto 0 2px}
+header h1{font-size:14px;font-weight:600;margin:0 0 0 2px}
+#gear{margin-right:auto;border:none;color:var(--sub);padding:5px 6px}
 button{font:inherit;font-size:12px;color:var(--fg);background:transparent;border:1px solid var(--line);border-radius:6px;padding:5px 9px;cursor:pointer}
 button:active{transform:scale(.97)}
 #status{font-size:10px;color:var(--sub);margin:0 2px 8px;min-height:13px}
 #status.err{color:#c0392b}
 details#settings{border:1px solid var(--line);border-radius:8px;padding:8px 10px;margin-bottom:10px;font-size:12px}
-details#settings summary{cursor:pointer;color:var(--sub)}
+details#settings summary{display:none}
+details#settings:not([open]){display:none}
 details#settings label{display:block;margin:8px 0 2px;color:var(--sub)}
 details#settings input{width:100%;font:inherit;font-size:14px;padding:6px;border:1px solid var(--line);border-radius:6px;background:var(--bg);color:var(--fg)}
 details#settings p{color:var(--sub);font-size:11px;margin:8px 0}
@@ -57,7 +59,7 @@ details#settings p{color:var(--sub);font-size:11px;margin:8px 0}
 .cell.we{background:transparent;border:1px dashed var(--line)}
 .cell.short{min-height:14px}
 .cell.ad{background:transparent;min-height:14px;cursor:default}
-.cell.ad.has{cursor:pointer}
+.cell.ad{cursor:pointer}
 .cell.today{outline:1.5px solid var(--today)}
 .it{flex:1;border-radius:3px;padding:1px 2px;display:flex;flex-direction:column;justify-content:center;text-align:center;line-height:1.15;word-break:break-all;overflow:hidden}
 .it.tt{background:var(--tt-bg);color:var(--tt-fg)}
@@ -83,12 +85,15 @@ details#settings p{color:var(--sub);font-size:11px;margin:8px 0}
 #sheet ul{list-style:none;margin:0;padding:0}
 #sheet li{padding:5px 0;border-top:1px solid var(--line)}
 #sheet li small{color:var(--sub);display:block;font-size:11px}
+#sheet-add{display:flex;gap:8px;flex-wrap:wrap;margin-top:8px}
+#sheet-add a{font-size:12px;color:var(--fg);text-decoration:none;border:1px solid var(--line);border-radius:6px;padding:5px 9px}
 </style>
 </head>
 <body>
 <main>
   <header>
     <h1>校時カレンダー</h1>
+    <button id="gear" aria-label="設定">⚙</button>
     <button id="prev" aria-label="前の週">◀</button>
     <button id="today">今週</button>
     <button id="next" aria-label="次の週">▶</button>
@@ -101,13 +106,15 @@ details#settings p{color:var(--sub);font-size:11px;margin:8px 0}
     <input id="url" type="url" autocomplete="off" spellcheck="false" placeholder="https://script.google.com/macros/s/…/exec">
     <label for="token">合言葉</label>
     <input id="token" type="password" autocomplete="off" spellcheck="false">
-    <p>この 2 つは、この機械のブラウザにだけ覚えさせます。どこにも送りません（GAS を呼ぶときに付けるだけです）。</p>
+    <label for="accounts">予定を追加するアカウント（任意。メールアドレスをカンマで区切る）</label>
+    <input id="accounts" type="text" autocomplete="off" spellcheck="false">
+    <p>どれも、この機械のブラウザにだけ覚えさせます。URL と合言葉は GAS を呼ぶときに付けるだけ、アカウントは Google カレンダーの作成画面を開くときに付けるだけです。アカウントが空なら、ブラウザで今ログインしているアカウントで開きます。</p>
     <button id="save">保存して読み込む</button>
   </details>
   <div id="legend" class="legend"></div>
   <div id="weeks"></div>
 </main>
-<div id="sheet"><h2><button id="sheet-close">閉じる</button><span id="sheet-title"></span></h2><ul id="sheet-list"></ul></div>
+<div id="sheet"><h2><button id="sheet-close">閉じる</button><span id="sheet-title"></span></h2><ul id="sheet-list"></ul><div id="sheet-add"></div></div>
 <script>
 const WEEKS = 1;
 const W = ['日','月','火','水','木','金','土'];
@@ -275,8 +282,8 @@ function render(data, loading){
       if (evs.length) {
         c.classList.add('has');
         c.innerHTML = evs.map(e => '<div class="it ' + e.cls + '">' + esc(e.title) + '</div>').join('');
-        bind(c, dates[i], '終日', evs.map(e => ({ title: e.title, sub: '終日・' + e.cal })));
       }
+      bind(c, dates[i], '終日', evs.map(e => ({ title: e.title, sub: '終日・' + e.cal })), { allDay: true });
       g.appendChild(c);
     });
 
@@ -292,14 +299,15 @@ function render(data, loading){
         l.innerHTML = esc(r.name) + (r.start && r.kind !== 'hour' ? '<small>' + esc(r.start) + '</small>' : '');
       }
       g.appendChild(l);
-      const short = r.name === '朝' || r.name.startsWith('昼') || r.kind === 'fold';
+      const short = r.kind === 'fold' || r.name.startsWith('昼') || (r.kind !== 'hour' && r.e - r.s <= 20);
       keys.forEach((k, i) => {
         const c = document.createElement('div');
         const we = i === 0 || i === 6;
         c.className = 'cell' + (we ? ' we' : '') + (short ? ' short' : '') + (r.kind === 'hour' ? ' hour' : '') + (k === todayKey ? ' today' : '');
         if ((r.after || r.late) && work[k] && r.s < toMin(work[k])) c.classList.add('work');
         const items = [], detail = [];
-        if (r.after && work[k]) {
+        const wEnd = work[k] ? toMin(work[k]) : null;
+        if ((r.after || r.late) && wEnd != null && ((wEnd >= r.s && (wEnd < r.e || r.e === 24*60)) || (r.after && wEnd < r.s))) {
           items.push('<div class="wk">勤務〜' + esc(work[k]) + '</div>');
           detail.push({ title: '勤務は ' + work[k] + ' まで', sub: '学校の終日の予定から' });
         }
@@ -314,7 +322,7 @@ function render(data, loading){
         });
         c.innerHTML = items.join('');
         const time = r.start ? r.start + (r.end ? '〜' + r.end : '〜') : '';
-        bind(c, dates[i], r.name + (/^\d+$/.test(r.name) ? '限' : '') + (time ? ' ' + time : ''), detail);
+        bind(c, dates[i], r.name + (/^\d+$/.test(r.name) ? '限' : '') + (time ? ' ' + time : ''), detail, { s: r.s, e: r.e });
         g.appendChild(c);
       });
     });
@@ -336,12 +344,28 @@ function fit(el){
   if (el.scrollWidth > el.clientWidth) el.style.whiteSpace = 'normal';
 }
 
-function bind(el, date, slot, detail){
+// Google カレンダーの作成画面を、日時を入れて開く（書き込みの権限は渡さない。保存は作成画面で人がする）
+function stamp(date, min){
+  const d = new Date(date.getFullYear(), date.getMonth(), date.getDate(), 0, min);
+  return d.getFullYear() + String(d.getMonth()+1).padStart(2,'0') + String(d.getDate()).padStart(2,'0')
+    + 'T' + String(d.getHours()).padStart(2,'0') + String(d.getMinutes()).padStart(2,'0') + '00';
+}
+function addLinks(date, range){
+  const dates = range.allDay
+    ? ymd(date).replace(/-/g, '') + '/' + ymd(addDays(date, 1)).replace(/-/g, '')
+    : stamp(date, range.s) + '/' + stamp(date, range.e);
+  const base = 'https://calendar.google.com/calendar/render?action=TEMPLATE&ctz=Asia%2FTokyo&dates=' + dates;
+  const accts = (store.get('gc:accounts') || '').split(',').map(s => s.trim()).filter(Boolean);
+  if (!accts.length) return '<a href="' + base + '" target="_blank" rel="noopener">＋ 予定を追加</a>';
+  return accts.map(a => '<a href="' + base + '&authuser=' + encodeURIComponent(a) + '" target="_blank" rel="noopener">＋ ' + esc(a.split('@')[0]) + '</a>').join('');
+}
+function bind(el, date, slot, detail, range){
   el.addEventListener('click', () => {
     $('sheet-title').textContent = md(date) + '（' + W[date.getDay()] + '） ' + slot;
     $('sheet-list').innerHTML = detail.length
       ? detail.map(d => '<li>' + esc(d.title) + '<small>' + esc(d.sub) + '</small></li>').join('')
       : '<li>空き</li>';
+    $('sheet-add').innerHTML = range ? addLinks(date, range) : '';
     $('sheet').classList.add('open');
   });
 }
@@ -406,7 +430,7 @@ async function fetchData(start, fresh){
 function when(iso){ if (!iso) return ''; const d = new Date(iso); return md(d) + ' ' + hm(d); }
 
 function sampleData(start){
-  const periods = [['朝','8:30','8:50'],['1','8:50','9:40'],['2','9:50','10:40'],['3','10:50','11:40'],['4','11:50','12:40'],['昼','12:40','13:25'],['5','13:25','14:15'],['6','14:25','15:15'],['放課後','15:15','']]
+  const periods = [['朝','8:30','8:50'],['1','8:50','9:40'],['2','9:50','10:40'],['3','10:50','11:40'],['4','11:50','12:40'],['昼','12:40','13:25'],['5','13:25','14:15'],['6','14:25','15:15'],['終礼','15:15','15:30'],['放課後','15:30','']]
     .map(([name, s, e]) => ({ name, start: s, end: e }));
   const timetable = [
     [1,'1','3-3','美術1'],[1,'3','3-1','美術1'],[1,'6','選択3年','美術'],
@@ -436,9 +460,11 @@ function sampleData(start){
 
 $('url').value = store.get('gc:url') || '';
 $('token').value = store.get('gc:token') || '';
+$('accounts').value = store.get('gc:accounts') || '';
 $('save').addEventListener('click', () => {
   store.set('gc:url', $('url').value.trim());
   store.set('gc:token', $('token').value.trim());
+  store.set('gc:accounts', $('accounts').value.trim());
   $('settings').open = false;
   load(true);
 });
@@ -446,6 +472,7 @@ $('prev').addEventListener('click', () => { offset--; load(false); });
 $('next').addEventListener('click', () => { offset++; load(false); });
 $('today').addEventListener('click', () => { offset = 0; load(false); });
 $('reload').addEventListener('click', () => load(true));
+$('gear').addEventListener('click', () => { $('settings').open = !$('settings').open; });
 $('sheet-close').addEventListener('click', () => $('sheet').classList.remove('open'));
 
 let touch = null;
