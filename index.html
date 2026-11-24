@@ -200,8 +200,53 @@ function calClass(label, map){
   return map[label];
 }
 
+const HALF = s => String(s).replace(/[０-９（），．]/g, c => ({ '（':'(', '）':')', '，':',', '．':'.' }[c] || String.fromCharCode(c.charCodeAt(0) - 0xFEE0)));
+// 終日の予定の中身を、括弧の外の読点・カンマで分ける（「5,6限」の括弧の中は分けない）
+function splitItems(t){ return HALF(t).split(/[、,](?![^()]*\))/).map(x => x.trim()).filter(Boolean); }
+// 「(5限)」「(5,6限)」「(4限目)」→ ['5','6']。「(放課後)」→ ['放課後']
+function parenSlots(item){
+  const m = /\(([^()]*)\)/.exec(item);
+  if (!m) return null;
+  if (/放課後/.test(m[1])) return ['放課後'];
+  if (!/限/.test(m[1])) return null;
+  const n = m[1].match(/\d+/g);
+  return n && n.length ? n : null;
+}
+function rowIndex(rows, slot){
+  if (slot === '放課後') return rows.findIndex(r => r.after);
+  return rows.findIndex(r => !r.kind && (r.name === slot || r.name === slot + '限'));
+}
+// その日に使う時程の種類（学校の終日の予定に「考査」などが入っていれば、その言葉）
+function dayTypes(data){
+  const kinds = [...new Set((data.periods || []).flatMap(p => Object.keys(p.alt || {})))];
+  const out = {};
+  if (!kinds.length) return out;
+  data.events.forEach(ev => {
+    if (ev.cal !== '学校' || !ev.allDay) return;
+    const k = kinds.find(x => String(ev.title).includes(x));
+    if (!k) return;
+    for (let d = parseYmd(ev.start), end = parseYmd(ev.end); d < end; d = addDays(d, 1)) out[ymd(d)] = k;
+  });
+  return out;
+}
+// 時程の種類が違う日だけ、段の時刻をその種類のものに置き換える（段の並びは週で揃えたまま）
+function rowsForType(data, rows, type){
+  const alt = {};
+  (data.periods || []).forEach(p => { if (p.alt && p.alt[type]) alt[p.name] = p.alt[type]; });
+  return rows.map(r => {
+    const a = !r.kind && alt[r.name];
+    if (!a) return r;
+    const s = toMin(a.start), e = toMin(a.end);
+    return Object.assign({}, r, { s: s != null ? s : r.s, e: e != null ? e : r.e, start: a.start || r.start, end: a.end || r.end });
+  });
+}
+
 function place(data, rows){
   const allDay = {}, timed = {}, calMap = {}, work = {};
+  const types = dayTypes(data), dayRows = {};
+  Object.entries(types).forEach(([k, t]) => { dayRows[k] = rowsForType(data, rows, t); });
+  const rowsOf = k => dayRows[k] || rows;
+  const extra = [];
   data.events.forEach(ev => {
     ev.cls = calClass(ev.cal, calMap);
     const wc = workCode(ev);
@@ -210,32 +255,60 @@ function place(data, rows){
       if (!wc.rest) return;
       ev = Object.assign({}, ev, { title: wc.rest });
     }
+    if (ev.allDay && ev.cal === '学校') {
+      splitItems(ev.title).forEach(item => {
+        const slots = parenSlots(item);
+        const name = item.replace(/\([^()]*\)/g, '').trim() || item;
+        for (let d = parseYmd(ev.start), end = parseYmd(ev.end); d < end; d = addDays(d, 1)) {
+          const k = ymd(d);
+          if (slots) {
+            const idx = slots.map(sl => rowIndex(rowsOf(k), sl)).filter(i => i >= 0);
+            idx.forEach((i, n) => {
+              timed[k] = timed[k] || {};
+              push(timed[k], i, { ev: Object.assign({}, ev, { title: name, allDay: false, label: item.match(/\(([^()]*)\)/)[1] + '（終日の予定から）' }), first: n === 0 });
+            });
+            continue;
+          }
+          const mt = (data.meetings || []).find(m => m.name && item.includes(m.name));
+          const ms = mt ? toMin(mt.start) : null;
+          if (ms == null) continue;
+          const me = toMin(mt.end) != null ? toMin(mt.end) : ms + 60;
+          const at = m => { const x = new Date(d); x.setHours(0, m, 0, 0); return x.toISOString(); };
+          extra.push(Object.assign({}, ev, { title: name, allDay: false, start: at(ms), end: at(me), fromMeeting: true }));
+        }
+      });
+    }
     if (ev.allDay) {
       for (let d = parseYmd(ev.start), end = parseYmd(ev.end); d < end; d = addDays(d, 1)) push(allDay, ymd(d), ev);
       return;
     }
+    placeTimed(ev);
+  });
+  extra.forEach(placeTimed);
+  function placeTimed(ev){
     const s = new Date(ev.start);
     let e = new Date(ev.end);
     if (e <= s) e = new Date(s.getTime() + 60000);
-    ev.label = hm(s) + '〜' + hm(e);
+    ev.label = hm(s) + '〜' + hm(e) + (ev.fromMeeting ? '（会議のシートの時刻）' : '');
     let first = true;
     const last = dayOf(new Date(e.getTime() - 1));
     for (let d = dayOf(s); d <= last; d = addDays(d, 1)) {
       const base = d.getTime();
       const sm = Math.max(0, (s - base) / 60000), em = Math.min(1440, (e - base) / 60000);
+      const k = ymd(d);
+      const rs = rowsOf(k);
       let hit = [];
-      rows.forEach((r, i) => { if (sm < r.e && em > r.s) hit.push(i); });
+      rs.forEach((r, i) => { if (sm < r.e && em > r.s) hit.push(i); });
       if (!hit.length) {
         let j = 0;
-        rows.forEach((r, i) => { if (r.s <= sm) j = i; });
+        rs.forEach((r, i) => { if (r.s <= sm) j = i; });
         hit = [j];
       }
-      const k = ymd(d);
       timed[k] = timed[k] || {};
       hit.forEach(i => { push(timed[k], i, { ev, first }); first = false; });
     }
-  });
-  return { allDay, timed, calMap, work };
+  }
+  return { allDay, timed, calMap, work, types, rowsOf };
 }
 
 let lastData = null;
@@ -247,7 +320,7 @@ function render(data, loading, target){
     shown = { data, loading };
   }
   const rows = buildRows(data.periods);
-  const { allDay, timed, calMap, work } = place(data, rows);
+  const { allDay, timed, calMap, work, types, rowsOf } = place(data, rows);
   const tt = {};
   data.timetable.forEach(t => { tt[t.day + '|' + t.period] = t; });
   const start = parseYmd(data.start);
@@ -307,6 +380,7 @@ function render(data, loading, target){
       g.appendChild(l);
       const short = r.kind === 'fold' || r.name.startsWith('昼') || (r.kind !== 'hour' && r.e - r.s <= 20);
       keys.forEach((k, i) => {
+        const dr = rowsOf(k)[ri];
         const c = document.createElement('div');
         const we = i === 0 || i === 6;
         c.className = 'cell' + (we ? ' we' : '') + (short ? ' short' : '') + (r.name === '朝' ? ' bottom' : '') + (r.kind === 'hour' ? ' hour' : '') + (k === todayKey ? ' today' : '');
@@ -317,7 +391,7 @@ function render(data, loading, target){
           items.push('<div class="wk">勤務〜' + esc(work[k]) + '</div>');
           detail.push({ title: '勤務は ' + work[k] + ' まで', sub: '学校の終日の予定から' });
         }
-        const t = (hol[i] || r.kind) ? null : tt[i + '|' + r.name];
+        const t = (hol[i] || types[k] || r.kind) ? null : tt[i + '|' + r.name];
         if (t) {
           items.push('<div class="it tt"><span class="one">' + esc((t.cls ? t.cls + ' ' : '') + t.subject) + '</span></div>');
           detail.push({ title: (t.cls ? t.cls + ' ' : '') + t.subject, sub: '授業' });
@@ -327,8 +401,8 @@ function render(data, loading, target){
           detail.push({ title: ev.title, sub: ev.label + '・' + ev.cal });
         });
         c.innerHTML = items.join('');
-        const time = r.start ? r.start + (r.end ? '〜' + r.end : '〜') : '';
-        bind(c, dates[i], r.name + (/^\d+$/.test(r.name) ? '限' : '') + (time ? ' ' + time : ''), detail, { s: r.s, e: (r.kind === 'fold' || r.after) ? Math.min(r.e, r.s + 60) : r.e });
+        const time = dr.start ? dr.start + (dr.end ? '〜' + dr.end : '〜') : '';
+        bind(c, dates[i], r.name + (/^\d+$/.test(r.name) ? '限' : '') + (time ? ' ' + time : '') + (types[k] && dr !== r ? '（' + types[k] + 'の時程）' : ''), detail, { s: dr.s, e: (dr.kind === 'fold' || dr.after) ? Math.min(dr.e, dr.s + 60) : dr.e });
         g.appendChild(c);
       });
     });
@@ -453,6 +527,9 @@ function when(iso){ if (!iso) return ''; const d = new Date(iso); return md(d) +
 function sampleData(start){
   const periods = [['朝','8:30','8:50'],['1','8:50','9:40'],['2','9:50','10:40'],['3','10:50','11:40'],['4','11:50','12:40'],['昼','12:40','13:25'],['5','13:25','14:15'],['6','14:25','15:15'],['終礼','15:15','15:30'],['放課後','15:30','']]
     .map(([name, s, e]) => ({ name, start: s, end: e }));
+  const exam = { '1': ['8:50','9:40'], '2': ['9:55','10:45'], '3': ['11:00','11:50'], '4': ['12:05','12:55'] };
+  periods.forEach(p => { if (exam[p.name]) p.alt = { '考査': { start: exam[p.name][0], end: exam[p.name][1] } }; });
+  const meetings = [{ name: '職員会議', start: '16:00', end: '17:00' }];
   const timetable = [
     [1,'1','3-3','美術1'],[1,'3','3-1','美術1'],[1,'6','選択3年','美術'],
     [2,'2','2-1','美術1'],[2,'4','3-3','美術1'],[2,'5','選択1年','eスポーツ'],
@@ -463,20 +540,20 @@ function sampleData(start){
   const at = (n, h, m) => { const d = addDays(start, n); d.setHours(h, m); return d.toISOString(); };
   const events = [
     { cal: '学校', title: '職員朝礼', allDay: false, start: at(1, 8, 30), end: at(1, 8, 40) },
-    { cal: '学校', title: '職員会議', allDay: false, start: at(3, 15, 40), end: at(3, 17, 0) },
+    { cal: '学校', title: '試験監督', allDay: false, start: at(2, 9, 55), end: at(2, 10, 45) },
     { cal: '学校', title: '学年集会', allDay: false, start: at(4, 14, 25), end: at(4, 15, 15) },
     { cal: '学校', title: '来客', allDay: false, start: at(2, 9, 40), end: at(2, 9, 50) },
     { cal: '学校', title: '研修', allDay: false, start: at(2, 9, 50), end: at(2, 12, 40) },
     { cal: '個人', title: '歯医者', allDay: false, start: at(6, 10, 0), end: at(6, 11, 0) },
     { cal: '個人', title: 'ジム', allDay: false, start: at(4, 20, 0), end: at(4, 21, 30) },
     { cal: '個人', title: '早朝の用事', allDay: false, start: at(5, 6, 30), end: at(5, 7, 30) },
-    { cal: '学校', title: '6) 期末考査', allDay: true, start: ymd(addDays(start, 2)), end: ymd(addDays(start, 3)) },
-    { cal: '学校', title: '10) 職員会議、学年の行事', allDay: true, start: ymd(addDays(start, 3)), end: ymd(addDays(start, 4)) },
+    { cal: '学校', title: '6) 期末考査①', allDay: true, start: ymd(addDays(start, 2)), end: ymd(addDays(start, 3)) },
+    { cal: '学校', title: '10) 職員会議、学年の行事(5,6限)', allDay: true, start: ymd(addDays(start, 3)), end: ymd(addDays(start, 4)) },
     { cal: '学校', title: '8)', allDay: true, start: ymd(addDays(start, 4)), end: ymd(addDays(start, 5)) },
     { cal: '学校', title: '８）模試', allDay: true, start: ymd(addDays(start, 5)), end: ymd(addDays(start, 6)) },
     { cal: '祝日', title: '祝日の例', allDay: true, start: ymd(addDays(start, 1)), end: ymd(addDays(start, 2)) },
   ];
-  return { generated: new Date().toISOString(), start: ymd(start), days: WEEKS * 7, periods, timetable, events, warnings: [] };
+  return { generated: new Date().toISOString(), start: ymd(start), days: WEEKS * 7, periods, meetings, timetable, events, warnings: [] };
 }
 
 $('url').value = store.get('gc:url') || '';

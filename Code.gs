@@ -16,7 +16,7 @@ function doGet(e) {
   if (!start) return json_({ error: 'bad start' });
 
   const cache = CacheService.getScriptCache();
-  const key = 'v1_' + fmt_(start, 'yyyyMMdd') + '_' + weeks;
+  const key = 'v2_' + fmt_(start, 'yyyyMMdd') + '_' + weeks;
   const hit = p.fresh === '1' ? null : cache.get(key);
   if (hit) return text_(hit);
 
@@ -28,6 +28,7 @@ function doGet(e) {
     start: fmt_(start, 'yyyy-MM-dd'),
     days: weeks * 7,
     periods: readPeriods_(),
+    meetings: readMeetings_(),
     timetable: readTimetable_(),
     events: readEvents_(start, end, warnings),
     warnings: warnings,
@@ -37,11 +38,38 @@ function doGet(e) {
   return text_(out);
 }
 
+// 時程: 校時 / 開始 / 終了。その右に「考査 開始」「考査 終了」のような列の組を足すと、
+// 学校の終日の予定にその言葉（考査）が入る日は、その時刻を使う
 function readPeriods_() {
-  const rows = sheet_('時程').getDataRange().getDisplayValues().slice(1);
-  return rows
+  const all = sheet_('時程').getDataRange().getDisplayValues();
+  const head = all[0] || [];
+  const alts = {};
+  head.forEach((h, c) => {
+    const m = String(h).trim().match(/^(\S+)[ 　]+(開始|終了)$/);
+    if (!m || c < 3) return;
+    alts[m[1]] = alts[m[1]] || {};
+    alts[m[1]][m[2] === '開始' ? 's' : 'e'] = c;
+  });
+  return all.slice(1)
     .filter(r => r[0])
-    .map(r => ({ name: r[0], start: r[1], end: r[2] }));
+    .map(r => {
+      const p = { name: r[0], start: r[1], end: r[2] };
+      Object.keys(alts).forEach(k => {
+        const a = alts[k];
+        const st = a.s != null ? r[a.s] : '', en = a.e != null ? r[a.e] : '';
+        if (st || en) { p.alt = p.alt || {}; p.alt[k] = { start: st, end: en }; }
+      });
+      return p;
+    });
+}
+
+// 会議: 名前 / 開始 / 終了。シートが無ければ空
+function readMeetings_() {
+  const sh = SpreadsheetApp.getActive().getSheetByName('会議');
+  if (!sh) return [];
+  return sh.getDataRange().getDisplayValues().slice(1)
+    .filter(r => r[0] && r[1])
+    .map(r => ({ name: String(r[0]).trim(), start: r[1], end: r[2] }));
 }
 
 function readTimetable_() {
@@ -101,7 +129,7 @@ function testRun() {
   const token = PropertiesService.getScriptProperties().getProperty('TOKEN');
   const data = JSON.parse(doGet({ parameter: { token: token, fresh: '1' } }).getContent());
   if (data.error) { console.log('エラー: ' + data.error); return; }
-  console.log(`${data.start} から ${data.days} 日 / 時程 ${data.periods.length} 行 / 時間割 ${data.timetable.length} コマ / 予定 ${data.events.length} 件`);
+  console.log(`${data.start} から ${data.days} 日 / 時程 ${data.periods.length} 行（別の時程: ${[...new Set(data.periods.flatMap(p => Object.keys(p.alt || {})))].join('・') || 'なし'}） / 会議 ${data.meetings.length} 件 / 時間割 ${data.timetable.length} コマ / 予定 ${data.events.length} 件`);
   if (data.warnings.length) console.log('注意: ' + data.warnings.join(' / '));
 }
 
