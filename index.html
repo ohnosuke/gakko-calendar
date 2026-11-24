@@ -35,7 +35,8 @@
 html,body{margin:0;background:var(--bg);color:var(--fg);font-family:-apple-system,BlinkMacSystemFont,"Hiragino Sans","Yu Gothic UI","Meiryo",sans-serif;-webkit-text-size-adjust:100%}
 body{padding:calc(env(safe-area-inset-top) + 8px) 6px calc(env(safe-area-inset-bottom) + 72px)}
 main{max-width:760px;margin:0 auto;overflow-x:clip}
-#weeks{touch-action:pan-y}
+#weeks{touch-action:pan-y;position:relative}
+.peek{position:absolute;top:0;width:100%}
 header{display:flex;align-items:center;gap:6px;margin-bottom:6px;flex-wrap:wrap}
 header h1{font-size:14px;font-weight:600;margin:0 0 0 2px}
 #gear{margin-right:auto;border:none;color:var(--sub);padding:5px 6px}
@@ -128,7 +129,6 @@ const store = {
 };
 const $ = id => document.getElementById(id);
 let offset = 0;
-let cells = [];
 let slideDir = 0;
 const MOTION = !(window.matchMedia && matchMedia('(prefers-reduced-motion: reduce)').matches);
 
@@ -241,23 +241,24 @@ function place(data, rows){
 let lastData = null;
 let shown = null;
 
-function render(data, loading){
-  if (!loading) lastData = data;
-  shown = { data, loading };
+function render(data, loading, target){
+  if (!target) {
+    if (!loading) lastData = data;
+    shown = { data, loading };
+  }
   const rows = buildRows(data.periods);
   const { allDay, timed, calMap, work } = place(data, rows);
   const tt = {};
   data.timetable.forEach(t => { tt[t.day + '|' + t.period] = t; });
   const start = parseYmd(data.start);
   const todayKey = ymd(new Date());
-  const box = $('weeks');
+  const box = target || $('weeks');
   box.innerHTML = '';
-  cells = [];
 
   const lg = ['<span style="--sw:var(--tt-bg)">授業</span>'];
   Object.entries(calMap).forEach(([label, c]) => lg.push('<span style="--sw:var(--' + c + '-bg)">' + esc(label) + '</span>'));
   if (data.events.some(e => e.cal === '祝日')) lg.push('<span style="--sw:var(--hol-bg)">祝日</span>');
-  $('legend').innerHTML = lg.join('');
+  if (!target) $('legend').innerHTML = lg.join('');
 
   for (let w = 0; w < data.days / 7; w++) {
     const g = document.createElement('div');
@@ -334,7 +335,7 @@ function render(data, loading){
     box.appendChild(g);
   }
   box.querySelectorAll('.one').forEach(fit);
-  if (slideDir) {
+  if (!target && slideDir) {
     const d = slideDir;
     slideDir = 0;
     box.style.transform = '';
@@ -342,10 +343,10 @@ function render(data, loading){
   }
 }
 
-function go(n){
+function go(n, noSlide){
   if (!n) return;
   offset += n;
-  slideDir = n > 0 ? 1 : -1;
+  slideDir = noSlide ? 0 : (n > 0 ? 1 : -1);
   $('sheet').classList.remove('open');
   load(false);
   if (slideDir) { slideDir = 0; $('weeks').style.transform = ''; }
@@ -497,19 +498,40 @@ $('sheet-close').addEventListener('click', () => $('sheet').classList.remove('op
 
 let touch = null;
 const weeksBox = $('weeks');
+const GAP = 12;
+function shiftCss(n){ return n > 0 ? 'translateX(calc(-100% - ' + GAP + 'px))' : 'translateX(calc(100% + ' + GAP + 'px))'; }
+function neighbor(n){
+  const s = addDays(startDate(), n * 7);
+  if (SAMPLE) return { data: sampleData(s) };
+  const c = store.get(cacheKey(s));
+  if (c) { try { return { data: JSON.parse(c) }; } catch (e) {} }
+  if (lastData) return { data: Object.assign({}, lastData, { start: ymd(s), events: [] }), loading: true };
+  return null;
+}
+function removePeek(){ weeksBox.querySelectorAll(':scope > .peek').forEach(p => p.remove()); }
+function showPeek(n){
+  removePeek();
+  const p = document.createElement('div');
+  p.className = 'peek';
+  p.style.left = n > 0 ? 'calc(100% + ' + GAP + 'px)' : 'calc(-100% - ' + GAP + 'px)';
+  weeksBox.appendChild(p);
+  const nb = neighbor(n);
+  if (nb) render(nb.data, nb.loading, p);
+}
 weeksBox.addEventListener('touchstart', e => {
   if (e.touches.length !== 1) { touch = null; return; }
   const t = e.touches[0];
-  touch = { x: t.clientX, y: t.clientY, axis: null, dx: 0 };
+  touch = { x: t.clientX, y: t.clientY, axis: null, peek: 0 };
 }, { passive: true });
 weeksBox.addEventListener('touchmove', e => {
   if (!touch) return;
   const t = e.touches[0];
   const dx = t.clientX - touch.x, dy = t.clientY - touch.y;
   if (!touch.axis && (Math.abs(dx) > 8 || Math.abs(dy) > 8)) touch.axis = Math.abs(dx) > Math.abs(dy) ? 'x' : 'y';
-  if (touch.axis !== 'x') return;
-  touch.dx = dx;
-  if (MOTION) weeksBox.style.transform = 'translateX(' + dx + 'px)';
+  if (touch.axis !== 'x' || !MOTION) return;
+  const dir = dx < 0 ? 1 : -1;
+  if (dx && touch.peek !== dir) { touch.peek = dir; showPeek(dir); }
+  weeksBox.style.transform = 'translateX(' + dx + 'px)';
 }, { passive: true });
 function endTouch(e, cancel){
   if (!touch) return;
@@ -518,13 +540,15 @@ function endTouch(e, cancel){
   const horiz = touch.axis === 'x';
   touch = null;
   const n = !cancel && horiz && Math.abs(dx) > 60 && Math.abs(dx) > Math.abs(dy) * 1.5 ? (dx < 0 ? 1 : -1) : 0;
-  if (!MOTION || !weeksBox.animate) { weeksBox.style.transform = ''; go(n); return; }
+  if (!MOTION || !weeksBox.animate) { weeksBox.style.transform = ''; removePeek(); go(n); return; }
   if (!n) {
-    if (horiz) { const a = weeksBox.animate([{ transform: 'translateX(' + dx + 'px)' }, { transform: 'none' }], { duration: 160, easing: 'ease-out' }); weeksBox.style.transform = ''; }
+    weeksBox.style.transform = '';
+    if (horiz) weeksBox.animate([{ transform: 'translateX(' + dx + 'px)' }, { transform: 'none' }], { duration: 160, easing: 'ease-out' }).onfinish = removePeek;
+    else removePeek();
     return;
   }
-  const out = weeksBox.animate([{ transform: 'translateX(' + dx + 'px)', opacity: 1 }, { transform: 'translateX(' + (-n * 100) + '%)', opacity: 0.3 }], { duration: 140, easing: 'ease-in', fill: 'forwards' });
-  out.onfinish = () => { weeksBox.style.transform = 'translateX(' + (-n * 100) + '%)'; out.cancel(); go(n); };
+  const out = weeksBox.animate([{ transform: 'translateX(' + dx + 'px)' }, { transform: shiftCss(n) }], { duration: 180, easing: 'cubic-bezier(.2,.7,.3,1)', fill: 'forwards' });
+  out.onfinish = () => { weeksBox.style.transform = ''; go(n, true); out.cancel(); };
 }
 weeksBox.addEventListener('touchend', e => endTouch(e, false), { passive: true });
 weeksBox.addEventListener('touchcancel', e => endTouch(e, true), { passive: true });
