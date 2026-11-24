@@ -233,12 +233,18 @@ function dayTypes(data){
 function rowsForType(data, rows, type){
   const alt = {};
   (data.periods || []).forEach(p => { if (p.alt && p.alt[type]) alt[p.name] = p.alt[type]; });
-  return rows.map(r => {
+  const out = rows.map(r => {
     const a = !r.kind && alt[r.name];
     if (!a) return r;
     const s = toMin(a.start), e = toMin(a.end);
-    return Object.assign({}, r, { s: s != null ? s : r.s, e: e != null ? e : r.e, start: a.start || r.start, end: a.end || r.end });
+    return Object.assign({}, r, { s: s != null ? s : r.s, e: e != null ? e : r.e, start: a.start || r.start, end: a.end || r.end, alt: true });
   });
+  // 考査の時程で延びた段のすぐあとの、置き換えていない段（昼など）は、延びた分だけ始まりを遅らせて重ねない
+  for (let i = 1; i < out.length; i++) {
+    const p = out[i-1], r = out[i];
+    if (p.alt && !r.alt && r.s < p.e && p.e < r.e) out[i] = Object.assign({}, r, { s: p.e, start: fmtMin(p.e) });
+  }
+  return out;
 }
 
 function place(data, rows){
