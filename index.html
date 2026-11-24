@@ -34,7 +34,8 @@
 *{box-sizing:border-box}
 html,body{margin:0;background:var(--bg);color:var(--fg);font-family:-apple-system,BlinkMacSystemFont,"Hiragino Sans","Yu Gothic UI","Meiryo",sans-serif;-webkit-text-size-adjust:100%}
 body{padding:calc(env(safe-area-inset-top) + 8px) 6px calc(env(safe-area-inset-bottom) + 72px)}
-main{max-width:760px;margin:0 auto}
+main{max-width:760px;margin:0 auto;overflow-x:clip}
+#weeks{touch-action:pan-y}
 header{display:flex;align-items:center;gap:6px;margin-bottom:6px;flex-wrap:wrap}
 header h1{font-size:14px;font-weight:600;margin:0 0 0 2px}
 #gear{margin-right:auto;border:none;color:var(--sub);padding:5px 6px}
@@ -128,6 +129,8 @@ const store = {
 const $ = id => document.getElementById(id);
 let offset = 0;
 let cells = [];
+let slideDir = 0;
+const MOTION = !(window.matchMedia && matchMedia('(prefers-reduced-motion: reduce)').matches);
 
 function dayOf(d){ return new Date(d.getFullYear(), d.getMonth(), d.getDate()); }
 function addDays(d, n){ return new Date(d.getFullYear(), d.getMonth(), d.getDate() + n); }
@@ -331,6 +334,21 @@ function render(data, loading){
     box.appendChild(g);
   }
   box.querySelectorAll('.one').forEach(fit);
+  if (slideDir) {
+    const d = slideDir;
+    slideDir = 0;
+    box.style.transform = '';
+    if (MOTION && box.animate) box.animate([{ transform: 'translateX(' + (d * 100) + '%)', opacity: 0.3 }, { transform: 'none', opacity: 1 }], { duration: 240, easing: 'cubic-bezier(.2,.75,.3,1)' });
+  }
+}
+
+function go(n){
+  if (!n) return;
+  offset += n;
+  slideDir = n > 0 ? 1 : -1;
+  $('sheet').classList.remove('open');
+  load(false);
+  if (slideDir) { slideDir = 0; $('weeks').style.transform = ''; }
 }
 
 function toggle(which){
@@ -470,29 +488,46 @@ $('save').addEventListener('click', () => {
   $('settings').open = false;
   load(true);
 });
-$('prev').addEventListener('click', () => { offset--; load(false); });
-$('next').addEventListener('click', () => { offset++; load(false); });
-$('today').addEventListener('click', () => { offset = 0; load(false); });
+$('prev').addEventListener('click', () => go(-1));
+$('next').addEventListener('click', () => go(1));
+$('today').addEventListener('click', () => { if (offset) go(-offset); else load(false); });
 $('reload').addEventListener('click', () => load(true));
 $('gear').addEventListener('click', () => { $('settings').open = !$('settings').open; });
 $('sheet-close').addEventListener('click', () => $('sheet').classList.remove('open'));
 
 let touch = null;
-$('weeks').addEventListener('touchstart', e => {
+const weeksBox = $('weeks');
+weeksBox.addEventListener('touchstart', e => {
+  if (e.touches.length !== 1) { touch = null; return; }
   const t = e.touches[0];
-  touch = { x: t.clientX, y: t.clientY };
+  touch = { x: t.clientX, y: t.clientY, axis: null, dx: 0 };
 }, { passive: true });
-$('weeks').addEventListener('touchend', e => {
+weeksBox.addEventListener('touchmove', e => {
+  if (!touch) return;
+  const t = e.touches[0];
+  const dx = t.clientX - touch.x, dy = t.clientY - touch.y;
+  if (!touch.axis && (Math.abs(dx) > 8 || Math.abs(dy) > 8)) touch.axis = Math.abs(dx) > Math.abs(dy) ? 'x' : 'y';
+  if (touch.axis !== 'x') return;
+  touch.dx = dx;
+  if (MOTION) weeksBox.style.transform = 'translateX(' + dx + 'px)';
+}, { passive: true });
+function endTouch(e, cancel){
   if (!touch) return;
   const t = e.changedTouches[0];
   const dx = t.clientX - touch.x, dy = t.clientY - touch.y;
+  const horiz = touch.axis === 'x';
   touch = null;
-  if (Math.abs(dx) > 60 && Math.abs(dx) > Math.abs(dy) * 1.5) {
-    offset += dx < 0 ? 1 : -1;
-    $('sheet').classList.remove('open');
-    load(false);
+  const n = !cancel && horiz && Math.abs(dx) > 60 && Math.abs(dx) > Math.abs(dy) * 1.5 ? (dx < 0 ? 1 : -1) : 0;
+  if (!MOTION || !weeksBox.animate) { weeksBox.style.transform = ''; go(n); return; }
+  if (!n) {
+    if (horiz) { const a = weeksBox.animate([{ transform: 'translateX(' + dx + 'px)' }, { transform: 'none' }], { duration: 160, easing: 'ease-out' }); weeksBox.style.transform = ''; }
+    return;
   }
-}, { passive: true });
+  const out = weeksBox.animate([{ transform: 'translateX(' + dx + 'px)', opacity: 1 }, { transform: 'translateX(' + (-n * 100) + '%)', opacity: 0.3 }], { duration: 140, easing: 'ease-in', fill: 'forwards' });
+  out.onfinish = () => { weeksBox.style.transform = 'translateX(' + (-n * 100) + '%)'; out.cancel(); go(n); };
+}
+weeksBox.addEventListener('touchend', e => endTouch(e, false), { passive: true });
+weeksBox.addEventListener('touchcancel', e => endTouch(e, true), { passive: true });
 
 let resizeTimer = null;
 window.addEventListener('resize', () => {
