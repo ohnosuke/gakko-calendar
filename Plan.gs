@@ -129,6 +129,7 @@ function makeLessons() {
   });
   const end = new Date(to.getFullYear(), to.getMonth(), to.getDate() + 1);
   const hol = CalendarApp.getCalendarById(HOLIDAY_CAL);
+  if (!hol) ss.toast('祝日のカレンダー（日本の祝日）が読めないので、祝日にも行を作ります。Google カレンダーで「日本の祝日」を登録すると読めます', '授業計画', 10);
   if (hol) hol.getEvents(from, end).forEach(ev => { if (ev.isAllDayEvent()) skip[ymd_(ev.getAllDayStartDate())] = true; });
 
   const sh = ss.getSheetByName('授業');
@@ -149,6 +150,7 @@ function makeLessons() {
     });
   }
   old.sort((a, b) => (a[0] - b[0]) || ((order[a[2]] ?? 99) - (order[b[2]] ?? 99)));
+  if (last > 1) sh.getRange(2, 1, last - 1, 9).clearContent();   // 途中の空の行を詰めるので、前の範囲を消してから書く
   if (old.length) sh.getRange(2, 1, old.length, 9).setValues(old);
   ss.toast(added + ' 行を足しました（全部で ' + old.length + ' 行）', '授業計画', 6);
 }
