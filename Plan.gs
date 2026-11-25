@@ -20,13 +20,13 @@ const TABS = {
 
 function onOpen() {
   SpreadsheetApp.getUi().createMenu('授業計画')
-    .addItem('最初の用意（タブと見出しを作る）', 'setup')
+    .addItem('最初の用意（シートと見出しを作る）', 'setup')
     .addItem('授業の行を足す', 'makeLessons')
     .addItem('課題の引き込みを作り直す', 'refreshTasks')
     .addToUi();
 }
 
-// タブが無ければ作り、見出し・入力の決まり・式を置く。あるタブの中身は消さない
+// シートが無ければ作り、見出し・入力の決まり・式を置く。あるシートの中身は消さない
 function setup() {
   const ss = SpreadsheetApp.getActive();
   Object.keys(TABS).forEach((name, i) => {
@@ -44,15 +44,15 @@ function setup() {
   if (!set.getRange('A2').getValue()) {
     set.getRange('A2:C12').setValues([
       ['期間の始まり', '', '授業の行を作る最初の日（1 学期の始業の日など）'],
-      ['期間の終わり', '', '授業の行を作る最後の日（3 学期の授業の終わりなど）。考査・長期の休みは日のタブに書く'],
+      ['期間の終わり', '', '授業の行を作る最後の日（3 学期の授業の終わりなど）。考査・長期の休みは日のシートに書く'],
       ['', '', ''],
-      ['時間割の切り替え', 'タブの名前', 'その日から使う時間割のタブ。上から日付の順に。いちばん上の日付より前は、いちばん上のタブ'],
+      ['時間割の切り替え', 'シートの名前', 'その日から使う時間割のシート。上から日付の順に。いちばん上の日付より前は、いちばん上のシート'],
       ['', '時間割', '例: 1 学期の始業の日'],
       ['', '', '例: 3 学期の始業の日 / 時間割_3学期'],
       ['', '', ''],
       ['', '', ''],
       ['', '', ''],
-      ['課題を引くブック', 'タブの名前', '下の行に、成績のブックの URL と課題管理のタブの名前（空なら 課題管理）を 1 行ずつ'],
+      ['課題を引くブック', 'シートの名前', '下の行に、成績のブックの URL と課題管理のシートの名前（空なら 課題管理）を 1 行ずつ'],
       ['', '', ''],
     ]);
     set.getRange('A5:C5').setFontWeight('bold');
@@ -63,7 +63,7 @@ function setup() {
   set.setColumnWidth(1, 160).setColumnWidth(2, 320).setColumnWidth(3, 420);
 
   const day = ss.getSheetByName('日');
-  day.getRange('A2:B').setNumberFormat('yyyy-mm-dd (ddd)');
+  day.getRange('A2:B').setNumberFormat('yyyy-mm-dd (ddd)').setDataValidation(null);  // 前の形（B 列が種類）のプルダウンを消す
   day.getRange('C2:C').setDataValidation(list_(DAY_KINDS));
 
   const les = ss.getSheetByName('授業');
@@ -76,7 +76,7 @@ function setup() {
   les.setColumnWidth(9, 360);
 
   const uni = ss.getSheetByName('単元');
-  // 割り当て済み: 授業のタブでこの単元が書かれた行の数。済み: そのうち今日までの行
+  // 割り当て済み: 授業のシートでこの単元が書かれた行の数。済み: そのうち今日までの行
   uni.getRange('D1').setFormula('={"割り当て済み";ARRAYFORMULA(IF(A2:A="","",COUNTIFS(授業!H2:H,A2:A,授業!D2:D,B2:B,授業!F2:F,"<>中止")))}');
   uni.getRange('E1').setFormula('={"済み";ARRAYFORMULA(IF(A2:A="","",COUNTIFS(授業!H2:H,A2:A,授業!D2:D,B2:B,授業!F2:F,"<>中止",授業!A2:A,"<="&TODAY())))}');
 
@@ -84,10 +84,10 @@ function setup() {
   if (!tt.getRange('A2').getValue()) tt.getRange('A2:A7').setValues([['1'], ['2'], ['3'], ['4'], ['5'], ['6']]);
 
   refreshTasks();
-  SpreadsheetApp.getActive().toast('タブと見出しを用意しました。設定のタブに期間と成績のブックを書いてください', '授業計画', 8);
+  SpreadsheetApp.getActive().toast('シートと見出しを用意しました。設定のシートに期間と成績のブックを書いてください', '授業計画', 8);
 }
 
-// 設定のタブに書いた成績のブックから、課題管理の生徒のデータでない列だけを引く
+// 設定のシートに書いた成績のブックから、課題管理の生徒のデータでない列だけを引く
 // 課題名・対象クラス・提出期限・状態・実施ID・期（課題管理の A・C・D・I・J・K 列）
 function refreshTasks() {
   const ss = SpreadsheetApp.getActive();
@@ -97,22 +97,22 @@ function refreshTasks() {
   sh.getRange('A1:F1').setValues([['課題名', '対象クラス', '提出期限', '状態', '実施ID', '期']]).setFontWeight('bold').setBackground('#1f2a5c').setFontColor('#ffffff');
   sh.setFrozenRows(1);
   sh.getRange('A2:F').clearContent();
-  if (!rows.length) { sh.getRange('A2').setValue('（設定のタブの「課題を引くブック」の下に、成績のブックの URL を書いて「課題の引き込みを作り直す」）'); return; }
+  if (!rows.length) { sh.getRange('A2').setValue('（設定のシートの「課題を引くブック」の下に、成績のブックの URL を書いて「課題の引き込みを作り直す」）'); return; }
   const parts = rows.map(([url, tab]) =>
     'QUERY(IMPORTRANGE("' + url + '","' + (tab || '課題管理') + '!A2:K"),"select Col1,Col3,Col4,Col9,Col10,Col11 where Col1 is not null and Col10 is not null",0)');
   sh.getRange('A2').setFormula('=' + (parts.length === 1 ? parts[0] : 'VSTACK(' + parts.join(',') + ')'));
   sh.getRange('C2:C').setNumberFormat('yyyy-mm-dd (ddd)');
 }
 
-// 時間割と日のタブから、期間の平日の授業の行を足す。ある行（日付・校時・クラスが同じ）は触らない。
-// 祝日と、日のタブで考査・休みの日は作らない。最後に日付・校時の順に並べ直す
+// 時間割と日のシートから、期間の平日の授業の行を足す。ある行（日付・校時・クラスが同じ）は触らない。
+// 祝日と、日のシートで考査・休みの日は作らない。最後に日付・校時の順に並べ直す
 function makeLessons() {
   const ss = SpreadsheetApp.getActive();
   const set = ss.getSheetByName('設定');
   const from = set.getRange('B2').getValue(), to = set.getRange('B3').getValue();
-  if (!(from instanceof Date) || !(to instanceof Date) || to < from) throw new Error('設定のタブの B2・B3 に期間の始まりと終わりの日付を入れてください');
+  if (!(from instanceof Date) || !(to instanceof Date) || to < from) throw new Error('設定のシートの B2・B3 に期間の始まりと終わりの日付を入れてください');
 
-  // 時間割の切り替え: [使い始める日, タブ]。日付の無い行はいちばん初めから
+  // 時間割の切り替え: [使い始める日, シート]。日付の無い行はいちばん初めから
   const order = {};
   const switches = section_(set, '時間割の切り替え')
     .filter(r => String(r[1]).trim())
@@ -153,7 +153,7 @@ function makeLessons() {
   ss.toast(added + ' 行を足しました（全部で ' + old.length + ' 行）', '授業計画', 6);
 }
 
-// 設定のタブで、A 列がその見出しの行の下から、A・B 列が両方空の行までを返す
+// 設定のシートで、A 列がその見出しの行の下から、A・B 列が両方空の行までを返す
 function section_(set, title) {
   const v = set.getDataRange().getValues();
   const i = v.findIndex(r => String(r[0]).trim() === title);
@@ -166,10 +166,10 @@ function section_(set, title) {
   return out;
 }
 
-// 時間割のタブを [曜の番号, 校時, クラス, 授業名] の並びにする。order に校時の並びを入れる
+// 時間割のシートを [曜の番号, 校時, クラス, 授業名] の並びにする。order に校時の並びを入れる
 function readTimetable_(ss, name, order) {
   const sh = ss.getSheetByName(name);
-  if (!sh) throw new Error('時間割のタブが無い: ' + name);
+  if (!sh) throw new Error('時間割のシートが無い: ' + name);
   const tt = sh.getDataRange().getDisplayValues();
   const head = tt[0];
   const slots = [];
