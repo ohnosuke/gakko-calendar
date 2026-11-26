@@ -16,13 +16,17 @@ const TABS = {
   '授業': ['日付', '曜', '校時', 'クラス', '授業名', '状態', '実施ID', '単元', '内容・進捗'],
   '単元': ['単元', 'クラス', '予定の回数', '割り当て済み', '済み', 'メモ'],
   '課題': [],
+  '進み具合': [],
+  '予定表': [],
 };
+const SUBJECT_MARK = { 'e': 'eスポーツ', '美': '美術' };   // 「選択3e」の最後の字 → 授業名
 
 function onOpen() {
   SpreadsheetApp.getUi().createMenu('授業計画')
     .addItem('最初の用意（シートと見出しを作る）', 'setup')
     .addItem('授業の行を足す', 'makeLessons')
     .addItem('課題の引き込みを作り直す', 'refreshTasks')
+    .addItem('進み具合・予定表の色を作り直す（単元を足したら）', 'refreshViews')
     .addToUi();
 }
 
@@ -86,6 +90,7 @@ function setup() {
   if (!tt.getRange('A2').getValue()) tt.getRange('A2:A7').setValues([['1'], ['2'], ['3'], ['4'], ['5'], ['6']]);
 
   refreshTasks();
+  buildViews_(ss);
   SpreadsheetApp.getActive().toast('シートと見出しを用意しました。設定のシートに期間と成績のブックを書いてください', '授業計画', 8);
 }
 
@@ -200,10 +205,72 @@ function splitClass_(v) {
   v = String(v).trim();
   const sp = v.match(/^(\S+)[ 　]+(.+)$/);
   const head = sp ? sp[1] : v;
+  const sel = head.match(/^[A-Za-z]*(選択(\d)(\S*))$/);   // 「選択3e」→ 3 年の eスポーツ。クラスは「選択3e」のまま
+  if (sel) return [sel[1], sp ? sp[2] : (SUBJECT_MARK[sel[3]] || sel[3] || '選択')];
   const m = head.match(/^[A-Za-z]*(\d+)(.*)$/);
   if (!m) return sp ? [sp[1], sp[2]] : ['', v];
   const rest = (m[2] + (sp ? ' ' + sp[2] : '')).trim();
   return rest ? [m[1], rest] : ['', v];
+}
+
+// 見る用のシート 2 枚。中身は式なので、授業・単元のシートを書けば勝手に変わる。色の決まりだけ GAS が置く
+// 進み具合: 縦に単元、横にクラス。マスは「済み/予定の回数」（済み = 今日までに、その単元を書いた中止でない授業の数）
+// 予定表: 縦にクラス、横に授業のある日付。マスはその日のその単元（中止は「中止」、単元が空なら「・」）
+const SEP = '",，、 "';
+function buildViews_(ss) {
+  const prog = ss.getSheetByName('進み具合');
+  prog.getRange('A1').setFormula(
+    '=LET(u,FILTER(単元!A2:C,単元!A2:A<>""),' +
+    'cls,SORT(UNIQUE(TOCOL(SPLIT(TEXTJOIN(",",TRUE,INDEX(u,,2)&""),' + SEP + '),3))),' +
+    'body,MAKEARRAY(ROWS(u),ROWS(cls),LAMBDA(i,j,LET(cl,INDEX(cls,j,1),' +
+    'IF(ISNUMBER(MATCH(cl&"",SPLIT(INDEX(u,i,2)&"",' + SEP + ')&"",0)),' +
+    'COUNTIFS(授業!H2:H,INDEX(u,i,1),授業!D2:D,cl,授業!F2:F,"<>中止",授業!A2:A,"<="&TODAY())&"/"&N(INDEX(u,i,3)),"")))),' +
+    'VSTACK(HSTACK("単元",TRANSPOSE(cls)),HSTACK(INDEX(u,,1),body)))');
+  prog.setFrozenRows(1); prog.setFrozenColumns(1);
+  prog.getRange('1:1').setFontWeight('bold');
+  prog.setColumnWidth(1, 180);
+  prog.getRange('B1:Z').setHorizontalAlignment('center');
+  const area = prog.getRange('B2:Z200');
+  const d = 'VALUE(REGEXEXTRACT(B2&"","^(\\d+)/"))', pl = 'VALUE(REGEXEXTRACT(B2&"","/(\\d+)$"))';
+  const rule = (f, bg) => SpreadsheetApp.newConditionalFormatRule().whenFormulaSatisfied('=IFERROR(' + f + ',FALSE)').setBackground(bg).setRanges([area]).build();
+  prog.setConditionalFormatRules([
+    rule(d + '>' + pl, '#f8c58c'),                              // 予定より多い: オレンジ
+    rule('AND(' + pl + '>0,' + d + '=' + pl + ')', '#6fbf73'),  // 予定どおり終わった: 濃い緑
+    rule(d + '>0', '#d4ecd5'),                                  // 途中: 薄い緑
+  ]);
+
+  const cal = ss.getSheetByName('予定表');
+  cal.getRange('A1').setFormula(
+    '=LET(dt,TOROW(SORT(UNIQUE(FILTER(授業!A2:A,授業!A2:A<>""))),1),' +
+    'cls,SORT(UNIQUE(FILTER(授業!D2:D,授業!D2:D<>""))),' +
+    'body,MAKEARRAY(ROWS(cls),COLUMNS(dt),LAMBDA(i,j,LET(f,FILTER(IF(授業!F2:F="中止","中止",IF(授業!H2:H="","・",授業!H2:H)),授業!A2:A=INDEX(dt,1,j),授業!D2:D=INDEX(cls,i,1)),' +
+    'IFERROR(TEXTJOIN("・",TRUE,UNIQUE(f)),"")))),' +
+    'VSTACK(HSTACK("クラス",dt),HSTACK(cls,body)))');
+  if (cal.getMaxColumns() < CAL_COLS) cal.insertColumnsAfter(cal.getMaxColumns(), CAL_COLS - cal.getMaxColumns());   // 1 年分の授業の日が横に並ぶので広げておく
+  cal.setFrozenRows(1); cal.setFrozenColumns(1);
+  cal.getRange(1, 2, 1, CAL_COLS - 1).setNumberFormat('m/d').setFontWeight('bold');
+  cal.getRange('A1:A').setFontWeight('bold');
+  cal.setColumnWidths(2, CAL_COLS - 1, 56);
+  cal.getRange(2, 2, 49, CAL_COLS - 1).setWrapStrategy(SpreadsheetApp.WrapStrategy.CLIP).setFontSize(9);
+  refreshViews();
+}
+
+// 予定表は、単元のシートの単元ごとに色を塗る（単元を足したら作り直す）
+const CAL_COLS = 260;
+const PALETTE = ['#cfe2f3', '#d9ead3', '#fff2cc', '#f4cccc', '#d9d2e9', '#fce5cd', '#d0e0e3', '#ead1dc', '#c9daf8', '#e6b8af'];
+function refreshViews() {
+  const ss = SpreadsheetApp.getActive();
+  const cal = ss.getSheetByName('予定表');
+  if (!cal) return;
+  const units = ss.getSheetByName('単元').getRange('A2:A').getDisplayValues().map(r => r[0].trim()).filter(Boolean);
+  const area = cal.getRange(2, 2, 49, CAL_COLS - 1);
+  const rules = [
+    SpreadsheetApp.newConditionalFormatRule().whenTextEqualTo('中止').setFontColor('#999999').setRanges([area]).build(),
+  ];
+  [...new Set(units)].forEach((u, i) => {
+    rules.push(SpreadsheetApp.newConditionalFormatRule().whenTextEqualTo(u).setBackground(PALETTE[i % PALETTE.length]).setRanges([area]).build());
+  });
+  cal.setConditionalFormatRules(rules);
 }
 
 function list_(items) { return SpreadsheetApp.newDataValidation().requireValueInList(items, true).setAllowInvalid(true).build(); }
