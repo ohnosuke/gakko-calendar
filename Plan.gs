@@ -77,8 +77,10 @@ function setup() {
 
   const uni = ss.getSheetByName('単元');
   // 割り当て済み: 授業のシートでこの単元が書かれた行の数。済み: そのうち今日までの行
-  uni.getRange('D1').setFormula('={"割り当て済み";ARRAYFORMULA(IF(A2:A="","",COUNTIFS(授業!H2:H,A2:A,授業!D2:D,B2:B,授業!F2:F,"<>中止")))}');
-  uni.getRange('E1').setFormula('={"済み";ARRAYFORMULA(IF(A2:A="","",COUNTIFS(授業!H2:H,A2:A,授業!D2:D,B2:B,授業!F2:F,"<>中止",授業!A2:A,"<="&TODAY())))}');
+  // クラスは「31,32,33」のようにまとめて書いてよい。クラスごとに「31: 3 / 32: 4」の形で出す
+  const per = (cond) => 'MAP(A2:A,B2:B,LAMBDA(u,c,IF(u="","",JOIN(" / ",MAP(SPLIT(c&"",",，、 "),LAMBDA(x,x&": "&COUNTIFS(授業!H2:H,u,授業!D2:D,x,授業!F2:F,"<>中止"' + cond + ')))))))';
+  uni.getRange('D1').setFormula('={"割り当て済み";' + per('') + '}');
+  uni.getRange('E1').setFormula('={"済み";' + per(',授業!A2:A,"<="&TODAY()') + '}');
 
   const tt = ss.getSheetByName('時間割');
   if (!tt.getRange('A2').getValue()) tt.getRange('A2:A7').setValues([['1'], ['2'], ['3'], ['4'], ['5'], ['6']]);
@@ -136,6 +138,9 @@ function makeLessons() {
   const last = sh.getLastRow();
   const old = last > 1 ? sh.getRange(2, 1, last - 1, 9).getValues().filter(r => r[0] !== '') : [];
   const have = {};
+  old.forEach(r => {           // 前の版でクラスを読めなかった行（「o31美術1」など）を直す
+    if (r[3] === '' && r[4] !== '') { const [c, sub] = splitClass_(String(r[4])); if (c) { r[3] = c; r[4] = sub; } }
+  });
   old.forEach(r => { have[(r[0] instanceof Date ? ymd_(r[0]) : r[0]) + '|' + r[2] + '|' + r[3]] = true; });
 
   let added = 0;
@@ -182,11 +187,23 @@ function readTimetable_(ss, name, order) {
       const v = String(r[c] || '').trim();
       const wd = W_NAMES.indexOf(head[c]);
       if (!v || wd < 0) continue;
-      const m = v.match(/^(\S+)[ 　](.+)$/);
-      slots.push([wd, r[0], m ? m[1] : '', m ? m[2] : v]);
+      const [cls, subject] = splitClass_(v);
+      slots.push([wd, r[0], cls, subject]);
     }
   });
   return slots;
+}
+
+// 時間割のマスを [クラス, 授業名] に分ける。「31 美術1」「o31美術1」「o31 美術1」→ ['31', '美術1']。
+// 頭の英字（担当の印など）は落とす。数字で始まらないときは、空白があれば前をクラス（「選択3年 美術」）、無ければクラスは空で全体を授業名にする
+function splitClass_(v) {
+  v = String(v).trim();
+  const sp = v.match(/^(\S+)[ 　]+(.+)$/);
+  const head = sp ? sp[1] : v;
+  const m = head.match(/^[A-Za-z]*(\d+)(.*)$/);
+  if (!m) return sp ? [sp[1], sp[2]] : ['', v];
+  const rest = (m[2] + (sp ? ' ' + sp[2] : '')).trim();
+  return rest ? [m[1], rest] : ['', v];
 }
 
 function list_(items) { return SpreadsheetApp.newDataValidation().requireValueInList(items, true).setAllowInvalid(true).build(); }
